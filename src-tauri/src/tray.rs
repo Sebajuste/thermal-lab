@@ -6,12 +6,12 @@
 
 use std::sync::Mutex;
 
+use crate::flyout::{self, Anchor};
+use crate::sensors::{Metric, Reading};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
-use crate::flyout::{self, Anchor};
-use crate::sensors::{Metric, Reading};
 
 pub const TRAY_ID: &str = "thermal-lab";
 
@@ -183,8 +183,16 @@ pub fn set_can_toggle(app: &AppHandle, can: bool) {
 
 /// Infobulle : l'essentiel sans rien ouvrir. Windows la limite a 127 caracteres.
 pub fn refresh_tooltip(app: &AppHandle, reading: &Reading, optimized: bool) {
-    let cpu = line("CPU", reading.get(Metric::CpuTempC), reading.get(Metric::CpuPowerW));
-    let gpu = line("GPU", reading.get(Metric::GpuTempC), reading.get(Metric::GpuPowerW));
+    let cpu = line(
+        "CPU",
+        reading.get(Metric::CpuTempC),
+        reading.get(Metric::CpuPowerW),
+    );
+    let gpu = line(
+        "GPU",
+        reading.get(Metric::GpuTempC),
+        reading.get(Metric::GpuPowerW),
+    );
     let text = format!(
         "Thermal Lab — optimisation {}\n{}{}",
         if optimized { "active" } else { "inactive" },
@@ -210,7 +218,11 @@ fn line(label: &str, temp: Option<f64>, power: Option<f64>) -> String {
         (t, p) => {
             let t = t.map(|v| format!("{v:.0} °C")).unwrap_or_default();
             let p = p.map(|v| format!("{v:.0} W")).unwrap_or_default();
-            let sep = if t.is_empty() || p.is_empty() { "" } else { " · " };
+            let sep = if t.is_empty() || p.is_empty() {
+                ""
+            } else {
+                " · "
+            };
             format!("{label} {t}{sep}{p}\n")
         }
     }

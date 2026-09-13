@@ -62,14 +62,13 @@ impl SensorHub {
             let ctx = ProbeContext { wmi: wmi.as_ref() };
 
             let mut providers = registry::build();
-            let mut states: Vec<ProbeState> =
-                providers.iter_mut().map(|p| p.probe(&ctx)).collect();
+            let mut states: Vec<ProbeState> = providers.iter_mut().map(|p| p.probe(&ctx)).collect();
             publish_statuses(&status_sink, &providers, &states);
 
             let mut tick: u32 = 0;
             loop {
                 tick = tick.wrapping_add(1);
-                let retry = tick % REPROBE_EVERY == 0;
+                let retry = tick.is_multiple_of(REPROBE_EVERY);
                 let mut changed = false;
 
                 let mut reading = Reading::default();

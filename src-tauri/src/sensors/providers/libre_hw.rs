@@ -107,7 +107,12 @@ mod tests {
     fn prefers_the_package_sensor() {
         let rows = [
             row("/amdcpu/0/temperature/2", "Temperature", "Core #1", 71.0),
-            row("/amdcpu/0/temperature/0", "Temperature", "Core (Tctl/Tdie)", 64.25),
+            row(
+                "/amdcpu/0/temperature/0",
+                "Temperature",
+                "Core (Tctl/Tdie)",
+                64.25,
+            ),
             row("/amdcpu/0/power/0", "Power", "Package", 88.125),
         ];
         let mut out = Reading::default();
@@ -121,8 +126,18 @@ mod tests {
     #[test]
     fn falls_back_to_the_hottest_core() {
         let rows = [
-            row("/intelcpu/0/temperature/1", "Temperature", "CPU Core #1", 58.0),
-            row("/intelcpu/0/temperature/2", "Temperature", "CPU Core #2", 66.5),
+            row(
+                "/intelcpu/0/temperature/1",
+                "Temperature",
+                "CPU Core #1",
+                58.0,
+            ),
+            row(
+                "/intelcpu/0/temperature/2",
+                "Temperature",
+                "CPU Core #2",
+                66.5,
+            ),
         ];
         let mut out = Reading::default();
         harvest(&rows, &mut out);
@@ -134,7 +149,12 @@ mod tests {
     /// capteurs « Core », que revendiquer ici serait un contresens.
     #[test]
     fn ignores_sensors_outside_the_cpu() {
-        let rows = [row("/gpu-amd/0/temperature/0", "Temperature", "GPU Core", 49.0)];
+        let rows = [row(
+            "/gpu-amd/0/temperature/0",
+            "Temperature",
+            "GPU Core",
+            49.0,
+        )];
         let mut out = Reading::default();
         harvest(&rows, &mut out);
 

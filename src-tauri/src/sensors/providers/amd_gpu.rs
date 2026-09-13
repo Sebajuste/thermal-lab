@@ -207,7 +207,10 @@ mod tests {
 
     #[test]
     fn keeps_the_hardware_instance_only() {
-        assert_eq!(instance_prefix("/gpu-amd/0/temperature/0"), Some("/gpu-amd/0"));
+        assert_eq!(
+            instance_prefix("/gpu-amd/0/temperature/0"),
+            Some("/gpu-amd/0")
+        );
         assert_eq!(instance_prefix("/amdgpu/1/load/0"), Some("/amdgpu/1"));
     }
 

@@ -88,7 +88,9 @@ impl Reading {
         if !value.is_finite() {
             return;
         }
-        self.values.entry(metric).or_insert(Sample { value, provider });
+        self.values
+            .entry(metric)
+            .or_insert(Sample { value, provider });
     }
 
     pub fn get(&self, metric: Metric) -> Option<f64> {

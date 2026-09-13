@@ -1,7 +1,7 @@
 # Thermal Lab
 
-**Cap your CPU's turbo, and watch what it actually costs.** A tray app for Windows that
-measures temperature, power and clock speed on both sides of the switch.
+**Cut your PC's power draw, and measure what it actually costs you.** A Windows tray app
+that reads temperature, power and clock speed on both sides of the switch.
 
 ## Why
 

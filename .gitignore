@@ -26,3 +26,6 @@ dist-ssr
 # Cles de signature des mises a jour. Elles vivent hors du depot ; cette ligne est un
 # filet, pas un emplacement.
 *.key
+
+# Regenere par tauri-build a chaque compilation.
+src-tauri/gen/schemas
