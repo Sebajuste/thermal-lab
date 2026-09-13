@@ -21,21 +21,24 @@ cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture   # voir les rele
 élévation l'application démarre en lecture seule et l'explique.
 
 Pour que les températures apparaissent, lancer **Core Temp** (ou HWiNFO avec « Shared
-Memory Support », ou LibreHardwareMonitor) — lui aussi en administrateur, son pilote en
-dépend. Inutile de redémarrer l'application : `probe()` est retenté toutes les 5 secondes.
+Memory Support », ou LibreHardwareMonitor avec son serveur web) — lui aussi en
+administrateur, son pilote en dépend. Inutile de redémarrer l'application : `probe()` est retenté toutes les 5 secondes.
 
 ## Tests
 
-37 tests, répartis selon ce qu'ils protègent :
+49 tests, répartis selon ce qu'ils protègent :
 
 | Zone | Ce qui est couvert |
 |---|---|
 | `metric.rs` | la règle d'arbitrage : premier servi, rejet des non-finis, un échec laisse la place |
 | `registry.rs` | identifiants uniques, tout externe a une URL, ordre de priorité |
+| `hub.rs` | le cycle d'une source : retentée au bon moment, lue dès qu'elle apparaît, perdue dès qu'elle se tait |
 | `power.rs` | parsing du GUID en français et en anglais, rejet des chaînes malformées |
 | `shared_memory.rs` | décodage des chaînes C, absence de section non fatale |
 | `hwinfo.rs` | dispositions mémoire — `size_of` 320 et 48, alignement du `__time64_t` |
 | `core_temp.rs` | décodage validé contre la vraie section partagée |
+| `lhm.rs` | aplatissement de `data.json`, capteurs sans lecture écartés |
+| `libre_hw.rs`, `amd_gpu.rs` | le tri des capteurs : package avant cœurs, une seule carte, rien hors du CPU |
 | `phases.rs` | aiguillage vers la bonne phase, secondes déduites de la période, remise à zéro |
 | `tools.rs` | cohérence des états rapportés, développement des `%VAR%`, énumération des processus |
 | `autostart.rs` | la tâche est élevée, silencieuse, liée au logon ; guillemets imbriqués de l'action ; une tâche restée sur un ancien emplacement ne compte pas |

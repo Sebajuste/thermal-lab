@@ -18,7 +18,7 @@ action. C'est leur croisement qui donne l'état affiché :
 | Fournisseur | Outil | Affiché | Ce qu'on propose |
 |---|---|---|---|
 | établi | — | `actif` | rien |
-| non établi | tourne | `lancé` | le réglage qui manque (mémoire partagée, élévation) |
+| non établi | tourne | `lancé` | le réglage qui manque (mémoire partagée, serveur web, élévation) |
 | non établi | installé, arrêté | `arrêté` | **le lancer**, en administrateur |
 | non établi | absent, avec certitude | `absent` | le lien de téléchargement |
 | non établi | introuvable, sans certitude | `introuvable` | le lien, sans affirmer qu'il manque |
@@ -26,8 +26,45 @@ action. C'est leur croisement qui donne l'état affiché :
 
 L'état `lancé` est celui qui justifie tout le reste : un outil peut tourner sans rien
 publier. HWiNFO démarre avec sa mémoire partagée désactivée ; Core Temp lancé sans
-élévation ne charge pas son pilote. Sans la détection de processus, ces deux cas
-ressemblaient à « pas installé ».
+élévation ne charge pas son pilote ; LibreHardwareMonitor démarre sans son serveur web.
+Sans la détection de processus, ces cas ressemblaient à « pas installé ».
+
+## Le cas LibreHardwareMonitor : le WMI a disparu
+
+LHM publiait ses capteurs dans l'espace de noms WMI `root\LibreHardwareMonitor`. La
+version **0.9.5** (janvier 2026) a supprimé ce fournisseur — .NET 10 ne le supporte plus
+([issue #2143]) — et les mainteneurs renvoient vers le serveur HTTP intégré. Un outil à
+jour tournait donc en affichant `lancé` indéfiniment, et le conseil qui accompagnait cet
+état, « lancer en administrateur », était sans effet.
+
+`sensors/lhm.rs` établit donc deux voies, dans cet ordre :
+
+1. **HTTP** — `http://localhost:8085/data.json`, la seule que propose un LHM à jour. Le
+   port se règle dans les options de l'outil ; `THERMAL_LAB_LHM_PORT` permet de nous le
+   dire quand il n'est pas celui par défaut ;
+2. **WMI** — `root\LibreHardwareMonitor` puis `root\OpenHardwareMonitor`, pour les
+   versions antérieures à 0.9.5 et pour OpenHardwareMonitor.
+
+Les champs se correspondent un pour un, ce qui laisse les deux pilotes qui les lisent
+(`libre_hw`, `amd_gpu`) ignorer par quelle voie la mesure est arrivée :
+
+| WMI | `data.json` |
+|---|---|
+| `Identifier` | `SensorId` |
+| `SensorType` | `Type` |
+| `Name` | `Text` |
+| `Value` | `RawValue` |
+
+`RawValue` et non `Value` : ce dernier est une chaîne mise en forme et localisée
+(`« 52,4 °C »`), inexploitable. Un capteur sans lecture vaut `"NaN"` et ne produit pas de
+ligne — le laisser passer masquerait le repli d'un pilote par une valeur qui ne mesure
+rien.
+
+Le serveur web n'étant pas actif par défaut, c'est ce que dit désormais l'état `lancé`
+pour cet outil : **Options → Remote Web Server → Run**, l'élévation restant nécessaire par
+ailleurs pour le pilote noyau.
+
+[issue #2143]: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/issues/2143
 
 ## Comment l'outil est localisé
 

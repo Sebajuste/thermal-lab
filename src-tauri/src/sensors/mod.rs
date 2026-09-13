@@ -6,10 +6,12 @@
 //! - `hub`       : la boucle d'echantillonnage
 //! - `providers` : les pilotes concrets
 //!
-//! Les deux modules restants sont des supports techniques partages par plusieurs
-//! pilotes : `wmi_context` pour l'acces WMI, `shared_memory` pour les sections nommees.
+//! Les modules restants sont des supports techniques partages par plusieurs pilotes :
+//! `wmi_context` pour l'acces WMI, `shared_memory` pour les sections nommees, `lhm` pour
+//! les capteurs de LibreHardwareMonitor, que deux pilotes se partagent.
 
 pub mod hub;
+pub mod lhm;
 pub mod metric;
 pub mod provider;
 pub mod providers;

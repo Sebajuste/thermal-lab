@@ -37,6 +37,7 @@ pub struct SensorRow {
     pub kind: String,
     /// Libelle affiche, deja en minuscules — les comparaisons se font toutes ainsi.
     pub name: String,
+    /// Toujours finie : un capteur sans lecture ne produit pas de ligne.
     pub value: f64,
 }
 
@@ -66,13 +67,14 @@ impl Source {
             Source::Wmi(con) => con.raw_query::<Row>(QUERY).ok().map(|rows| {
                 rows.iter()
                     .filter_map(|r| {
+                        let value = variant_f64(r.get("Value")).filter(|v| v.is_finite())?;
                         Some(SensorRow {
                             id: variant_string(r.get("Identifier"))?,
                             kind: variant_string(r.get("SensorType")).unwrap_or_default(),
                             name: variant_string(r.get("Name"))
                                 .unwrap_or_default()
                                 .to_lowercase(),
-                            value: variant_f64(r.get("Value"))?,
+                            value,
                         })
                     })
                     .collect()
@@ -93,7 +95,10 @@ fn http_source() -> Option<Source> {
         .timeout(TIMEOUT)
         .max_idle_connections_per_host(1)
         .build();
-    let url = format!("http://localhost:{}/data.json", port());
+    // `127.0.0.1` et non `localhost` : ce dernier se resout d'abord en `::1` sur Windows,
+    // et l'attente qui suit coute un cycle d'echantillonnage entier. Le serveur de LHM
+    // ecoute sur toutes les interfaces.
+    let url = format!("http://127.0.0.1:{}/data.json", port());
     fetch_json(&agent, &url).map(|_| Source::Http { url, agent })
 }
 
@@ -131,7 +136,12 @@ fn fetch_json(agent: &ureq::Agent, url: &str) -> Option<Vec<SensorRow>> {
 }
 
 fn collect(node: &Node, out: &mut Vec<SensorRow>) {
-    if let (Some(id), Some(value)) = (&node.sensor_id, node.raw_value.as_ref().and_then(number)) {
+    let value = node
+        .raw_value
+        .as_ref()
+        .and_then(number)
+        .filter(|v| v.is_finite());
+    if let (Some(id), Some(value)) = (&node.sensor_id, value) {
         out.push(SensorRow {
             id: id.clone(),
             kind: node.kind.clone().unwrap_or_default(),
@@ -145,7 +155,7 @@ fn collect(node: &Node, out: &mut Vec<SensorRow>) {
 }
 
 /// `RawValue` arrive en nombre, ou en chaine pour les valeurs que JSON ne sait pas
-/// ecrire (`"NaN"`). Un `NaN` traverse sans dommage : `Reading::offer` le rejette.
+/// ecrire (`"NaN"`) — un capteur sans lecture, que l'appelant ecarte.
 fn number(v: &serde_json::Value) -> Option<f64> {
     match v {
         serde_json::Value::Number(n) => n.as_f64(),
@@ -184,18 +194,17 @@ mod tests {
     #[test]
     fn flattens_the_tree_into_sensor_rows() {
         let rows = parse(SAMPLE);
-        assert_eq!(rows.len(), 2, "les deux capteurs doivent ressortir");
         assert_eq!(rows[0].id, "/amdcpu/0/temperature/0");
         assert_eq!(rows[0].kind, "Temperature");
         assert_eq!(rows[0].name, "core (tctl/tdie)");
         assert_eq!(rows[0].value, 52.375);
     }
 
-    /// Un capteur sans lecture sort en `NaN` plutot que d'etre tu : c'est `offer` qui
-    /// tranche, et lui seul.
+    /// Un capteur sans lecture vaut `"NaN"` : le laisser passer reviendrait a masquer
+    /// le repli d'un fournisseur par une valeur qui ne mesure rien.
     #[test]
-    fn keeps_unreadable_sensors_as_nan() {
-        assert!(parse(SAMPLE)[1].value.is_nan());
+    fn drops_unreadable_sensors() {
+        assert_eq!(parse(SAMPLE).len(), 1, "le capteur NaN doit etre ecarte");
     }
 
     /// Les noeuds de materiel n'ont pas de `SensorId` : ils ne valent que par leurs

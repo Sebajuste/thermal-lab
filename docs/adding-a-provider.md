@@ -12,7 +12,9 @@ modèle de capacités.
 //! <ce que l'utilisateur doit avoir fait pour que ça marche>
 
 use crate::sensors::metric::{Metric, Reading};
-use crate::sensors::provider::{ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind};
+use crate::sensors::provider::{
+    ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
+};
 
 const ID: &str = "mon-outil";
 const PROVIDES: &[Metric] = &[Metric::CpuTempC];
@@ -39,8 +41,10 @@ impl Provider for MonProvider {
 
     fn probe(&mut self, ctx: &ProbeContext<'_>) -> ProbeState { /* … */ }
 
-    fn sample(&mut self, out: &mut Reading) {
+    fn sample(&mut self, out: &mut Reading) -> Sampled {
+        let Some(données) = self.lire() else { return Sampled::Lost };
         out.offer(Metric::CpuTempC, valeur, ID);
+        Sampled::Answered
     }
 }
 ```
@@ -60,14 +64,21 @@ LibreHardwareMonitor savent lire le GPU, mais ne déclarent que les métriques C
 pas un oubli — sans quoi l'ordre global du registre devrait arbitrer CPU et GPU
 simultanément, ce qu'un simple rang ne permet pas.
 
-**Une source, plusieurs pilotes, quand les prérequis diffèrent.** `amd_gpu.rs` interroge
-le même WMI que `libre_hw.rs` mais reste un fichier séparé : il ne mesure rien sans carte
+**Une source, plusieurs pilotes, quand les prérequis diffèrent.** `amd_gpu.rs` lit les
+mêmes capteurs que `libre_hw.rs` — via `sensors/lhm.rs` — mais reste un fichier séparé : il ne mesure rien sans carte
 Radeon, et `provides` doit dire exactement cela. Les fusionner ferait promettre à l'UI des
 grandeurs GPU sur une machine qui n'en a pas, ou taire la température CPU sur une machine
 sans Radeon.
 
 **`sample()` ne se soucie pas des conflits.** Il propose, `offer` arbitre. Ne jamais
 tester si une valeur est déjà présente.
+
+**Le retour de `sample()` parle de la source, pas des valeurs.** `Sampled::Lost`
+uniquement quand elle ne répond plus — section disparue, requête en échec, outil fermé —
+et jamais parce qu'une grandeur manque : une carte sans capteur de puissance a bel et bien
+répondu. Le hub redemande aussitôt une source perdue, ce qui remet l'état affiché en
+accord avec la réalité ; la confondre avec une grandeur absente ferait clignoter un
+fournisseur parfaitement sain.
 
 **Distinguer `Unavailable` de `Failed`.** L'outil n'est pas lancé → `Unavailable` avec un
 `hint` actionnable. La section existe mais la structure est illisible → `Failed`, qui

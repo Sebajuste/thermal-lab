@@ -66,8 +66,8 @@ Sept sources, toutes optionnelles et dégradables :
 | Zone thermique ACPI | température carte mère (indicative) | selon la carte |
 | **Core Temp** (mémoire partagée) | **température et puissance package CPU** | si Core Temp tourne |
 | **HWiNFO** (mémoire partagée) | idem | si HWiNFO tourne, mémoire partagée activée |
-| LibreHardwareMonitor (WMI) | idem | si LHM tourne |
-| **GPU AMD** via LHM (WMI) | **température, puissance, horloge, charge GPU** | si LHM tourne, carte Radeon |
+| LibreHardwareMonitor (HTTP) | idem | si LHM tourne, serveur web activé |
+| **GPU AMD** via LHM (HTTP) | **température, puissance, horloge, charge GPU** | si LHM tourne, carte Radeon |
 
 Les trois derniers apportent leur propre pilote signé ; l'application n'en embarque aucun.
 `providers/core_temp.rs` mappe la section nommée `CoreTempMappingObjectEx`,
@@ -113,6 +113,7 @@ src-tauri/src/
     hub.rs                      la boucle d'échantillonnage
     wmi_context.rs              accès WMI partagé (COM, connexions, variants)
     shared_memory.rs            mappage de sections nommées, partagé par deux pilotes
+    lhm.rs                      capteurs LibreHardwareMonitor (HTTP, repli WMI)
     providers/
       core_temp.rs  hwinfo.rs  libre_hw.rs  amd_gpu.rs
       perf_counters.rs  nvidia.rs  acpi.rs

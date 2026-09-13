@@ -8,7 +8,9 @@ use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use crate::sensors::metric::{Metric, Reading};
-use crate::sensors::provider::{ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind};
+use crate::sensors::provider::{
+    ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
+};
 
 const ID: &str = "nvidia-smi";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -75,18 +77,24 @@ impl Provider for NvidiaProvider {
         }
     }
 
-    fn sample(&mut self, out: &mut Reading) {
+    fn sample(&mut self, out: &mut Reading) -> Sampled {
         if !self.available {
-            return;
+            return Sampled::Lost;
         }
-        let Some(text) = Self::query() else { return };
+        let Some(text) = Self::query() else {
+            return Sampled::Lost;
+        };
         // Premier GPU uniquement : le POC ne gere pas le multi-carte.
-        let Some(line) = text.lines().next() else { return };
+        let Some(line) = text.lines().next() else {
+            return Sampled::Lost;
+        };
 
         for (metric, field) in COLUMNS.iter().zip(line.split(',')) {
             if let Ok(v) = field.trim().parse::<f64>() {
                 out.offer(*metric, v, ID);
             }
         }
+
+        Sampled::Answered
     }
 }

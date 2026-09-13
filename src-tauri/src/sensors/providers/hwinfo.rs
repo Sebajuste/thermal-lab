@@ -8,7 +8,9 @@
 //! dans ses reglages : il est desactive par defaut.
 
 use crate::sensors::metric::{Metric, Reading};
-use crate::sensors::provider::{ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind};
+use crate::sensors::provider::{
+    ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
+};
 use crate::sensors::shared_memory::{c_string, MappedView};
 
 const ID: &str = "hwinfo";
@@ -102,12 +104,16 @@ impl Provider for HwInfoProvider {
         }
     }
 
-    fn sample(&mut self, out: &mut Reading) {
+    fn sample(&mut self, out: &mut Reading) -> Sampled {
         if !self.available {
-            return;
+            return Sampled::Lost;
         }
-        let Some(view) = MappedView::open(SECTION) else { return };
-        let Some(h) = Self::header(&view) else { return };
+        let Some(view) = MappedView::open(SECTION) else {
+            return Sampled::Lost;
+        };
+        let Some(h) = Self::header(&view) else {
+            return Sampled::Lost;
+        };
 
         for i in 0..h.reading_count {
             let offset = h.reading_offset as usize + (i as usize) * h.reading_element_size as usize;
@@ -131,6 +137,8 @@ impl Provider for HwInfoProvider {
                 _ => {}
             }
         }
+
+        Sampled::Answered
     }
 }
 

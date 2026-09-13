@@ -57,10 +57,11 @@ celui du frontend. Voir [background-ux.md](background-ux.md).
 | `sensors/hub.rs` | la boucle d'échantillonnage et l'état des sources |
 | `sensors/wmi_context.rs` | accès WMI partagé : COM, connexions, décodage des variants |
 | `sensors/shared_memory.rs` | mappage de sections nommées, partagé par deux pilotes |
+| `sensors/lhm.rs` | capteurs LibreHardwareMonitor : HTTP d'abord, WMI en repli |
 | `sensors/providers/*.rs` | un pilote par fournisseur |
 
-`wmi_context.rs` et `shared_memory.rs` sont des supports techniques, pas des sources :
-ils n'existent que parce que plusieurs pilotes en ont besoin.
+`wmi_context.rs`, `shared_memory.rs` et `lhm.rs` sont des supports techniques, pas des
+sources : ils n'existent que parce que plusieurs pilotes en ont besoin.
 
 `sensors/` ne connaît ni Tauri ni l'UI, et cela reste vrai avec `on_reading` : le hub
 appelle une fermeture, il ignore ce qu'elle fait. Tout ce qui touche à l'application
@@ -72,7 +73,7 @@ appelle une fermeture, il ignore ce qu'elle fait. Tout ce qui touche à l'applic
 pub trait Provider {
     fn info(&self) -> ProviderInfo;                            // ce qu'il sait mesurer
     fn probe(&mut self, ctx: &ProbeContext<'_>) -> ProbeState; // tenter de s'établir
-    fn sample(&mut self, out: &mut Reading);                   // alimenter le relevé
+    fn sample(&mut self, out: &mut Reading) -> Sampled;        // alimenter le relevé
 }
 ```
 
@@ -94,13 +95,20 @@ stateDiagram-v2
     probe --> Ready: source établie
     probe --> Unavailable: outil non lancé, matériel absent
     probe --> Failed: signature ou structure inattendue
-    Ready --> Ready: sample() à chaque cycle
+    Ready --> Ready: sample() répond — à chaque cycle
+    Ready --> probe: sample() renvoie Lost — la source s'est tue
     Unavailable --> probe: nouvelle tentative tous les 5 cycles
     Failed --> probe: nouvelle tentative tous les 5 cycles
 ```
 
-Une source `Ready` n'est jamais re-sondée : seules celles qui ne le sont pas retentent
-leur chance, ce qui permet la reprise à chaud sans coût en régime établi.
+Une source `Ready` n'est re-sondée que si elle cesse de répondre. En régime établi cela ne
+coûte rien : c'est `sample()` lui-même qui le signale, par son retour `Sampled::Lost`, et
+non une vérification périodique. Sans cela, un outil fermé en cours de route laissait
+`actif` affiché pendant que le relevé se vidait — le symptôme inverse de celui que le
+modèle de capacités cherche à éviter.
+
+Ce retour ne parle que de la source : une grandeur manquante n'est pas une perte, sans
+quoi une carte sans capteur de puissance ferait clignoter un fournisseur sain.
 
 ## Résolution des conflits
 
@@ -161,7 +169,8 @@ Le coût est une indirection à la lecture, absorbée côté TypeScript par `val
 
 ## Reprise à chaud
 
-`hub.rs` retente `probe()` sur les sources non établies tous les 5 cycles. Lancer Core
-Temp pendant que l'application tourne suffit donc à faire apparaître les températures,
-sans redémarrage. Le frontend relit les capacités périodiquement pour refléter
+`hub.rs` retente `probe()` sur les sources non établies tous les 5 cycles, et lit celle
+qui vient d'apparaître dans le cycle même où elle s'établit. Lancer Core Temp pendant que
+l'application tourne suffit donc à faire apparaître les températures, sans redémarrage —
+et le fermer suffit à les faire disparaître, l'état affiché suivant dans les deux sens. Le frontend relit les capacités périodiquement pour refléter
 ce changement.

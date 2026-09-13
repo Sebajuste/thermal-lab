@@ -68,6 +68,19 @@ pub struct ProviderInfo {
     pub url: Option<&'static str>,
 }
 
+/// Ce qu'un cycle de mesure apprend sur la source elle-meme, independamment des valeurs
+/// qu'elle a pu poser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sampled {
+    /// La source a repondu — meme si elle n'a rien apporte au releve, parce qu'une
+    /// source plus fiable avait deja pose ses grandeurs.
+    Answered,
+    /// La source ne repond plus : l'outil a ete ferme, sa section a disparu. Un
+    /// fournisseur etabli une fois ne l'est pas pour toujours, et le hub doit
+    /// l'apprendre autrement qu'en publiant du silence.
+    Lost,
+}
+
 /// Ce que le hub met a disposition au moment d'etablir une source.
 pub struct ProbeContext<'a> {
     /// Absent si l'initialisation COM a echoue : les fournisseurs WMI doivent alors
@@ -86,5 +99,9 @@ pub trait Provider {
 
     /// Alimente le releve. N'ecrase jamais une valeur deja posee : `Reading::offer`
     /// s'en charge, le fournisseur n'a pas a s'en soucier.
-    fn sample(&mut self, out: &mut Reading);
+    ///
+    /// Le retour ne porte que sur la source : `Lost` des qu'elle ne repond plus, jamais
+    /// parce qu'une grandeur manque. Une carte sans capteur de puissance repond quand
+    /// meme.
+    fn sample(&mut self, out: &mut Reading) -> Sampled;
 }

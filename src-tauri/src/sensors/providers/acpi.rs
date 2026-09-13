@@ -8,7 +8,9 @@
 use wmi::WMIConnection;
 
 use crate::sensors::metric::{Metric, Reading};
-use crate::sensors::provider::{ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind};
+use crate::sensors::provider::{
+    ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
+};
 use crate::sensors::wmi_context::{variant_f64, Row};
 
 const ID: &str = "acpi";
@@ -61,10 +63,12 @@ impl Provider for AcpiProvider {
         }
     }
 
-    fn sample(&mut self, out: &mut Reading) {
-        let Some(con) = &self.con else { return };
+    fn sample(&mut self, out: &mut Reading) -> Sampled {
+        let Some(con) = &self.con else {
+            return Sampled::Lost;
+        };
         let Ok(rows) = con.raw_query::<Row>(QUERY) else {
-            return;
+            return Sampled::Lost;
         };
 
         let hottest = rows
@@ -77,5 +81,7 @@ impl Provider for AcpiProvider {
         if let Some(t) = hottest {
             out.offer(Metric::BoardTempC, t, ID);
         }
+
+        Sampled::Answered
     }
 }

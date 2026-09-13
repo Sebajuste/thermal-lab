@@ -1,4 +1,4 @@
-//! Pilote GPU AMD/Radeon — espace de noms WMI `root\LibreHardwareMonitor`.
+//! Pilote GPU AMD/Radeon — capteurs de LibreHardwareMonitor.
 //!
 //! AMD n'a pas d'equivalent de `nvidia-smi` livre avec le pilote graphique : la seule
 //! voie sans SDK natif passe par LibreHardwareMonitor, qui publie les capteurs de la
@@ -8,22 +8,21 @@
 //! lui apporterait *ces* grandeurs-la.
 //!
 //! Cote utilisateur, LHM doit tourner en administrateur — sans quoi il ne charge pas son
-//! pilote noyau et ne publie rien.
+//! pilote noyau et ne publie rien — et exposer ses capteurs : voir `lhm` pour les deux
+//! voies de lecture.
 //!
 //! **Une seule carte** : celle de plus petit index. Sur une machine ou un iGPU Radeon
 //! cotoie une carte dediee, c'est l'iGPU qui peut sortir gagnant, et le rang du registre
 //! ne permet pas d'arbitrer plus finement — le POC ne gere pas le multi-carte, pas plus
 //! ici que dans `nvidia`.
 
-use wmi::WMIConnection;
-
+use crate::sensors::lhm::{self, SensorRow, Source};
 use crate::sensors::metric::{Metric, Reading};
-use crate::sensors::provider::{ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind};
-use crate::sensors::wmi_context::{variant_f64, variant_string, Row};
+use crate::sensors::provider::{
+    ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
+};
 
 const ID: &str = "amd-gpu";
-const NAMESPACES: [&str; 2] = ["root\\LibreHardwareMonitor", "root\\OpenHardwareMonitor"];
-const QUERY: &str = "SELECT Name, Value, SensorType, Identifier FROM Sensor";
 
 /// Les deux graphies rencontrees : LHM a renomme le type materiel, OHM garde l'ancienne.
 const MARKERS: [&str; 2] = ["/gpu-amd/", "/amdgpu/"];
@@ -48,7 +47,7 @@ fn instance_prefix(identifier: &str) -> Option<&str> {
 
 #[derive(Default)]
 pub struct AmdGpuProvider {
-    con: Option<WMIConnection>,
+    source: Option<Source>,
 }
 
 impl AmdGpuProvider {
@@ -69,124 +68,142 @@ impl Provider for AmdGpuProvider {
     }
 
     fn probe(&mut self, ctx: &ProbeContext<'_>) -> ProbeState {
-        let Some(wmi) = ctx.wmi else {
-            return ProbeState::Failed {
-                error: "COM indisponible".into(),
-            };
-        };
+        self.source = None;
 
-        let con = NAMESPACES
-            .into_iter()
-            .find_map(|ns| wmi.connect(ns).ok())
-            .filter(|con| con.raw_query::<Row>(QUERY).is_ok());
-
-        let Some(con) = con else {
-            self.con = None;
-            return ProbeState::unavailable(
-                "LibreHardwareMonitor ne tourne pas",
-                "Lancer LibreHardwareMonitor en administrateur.",
-            );
+        let Some(source) = Source::open(ctx.wmi) else {
+            return ProbeState::unavailable(lhm::UNAVAILABLE_REASON, lhm::UNAVAILABLE_HINT);
         };
 
         // LHM present ne veut pas dire carte AMD presente : sans capteur `/gpu-amd/`,
         // rien ne sera jamais mesure et le dire vaut mieux que se declarer Ready.
-        let has_amd = con.raw_query::<Row>(QUERY).is_ok_and(|rows| {
-            rows.iter().any(|r| {
-                variant_string(r.get("Identifier"))
-                    .as_deref()
-                    .and_then(instance_prefix)
-                    .is_some()
-            })
-        });
+        let has_amd = source
+            .rows()
+            .is_some_and(|rows| rows.iter().any(|r| instance_prefix(&r.id).is_some()));
 
         if !has_amd {
-            self.con = None;
             return ProbeState::unavailable_only(
                 "aucun GPU AMD parmi les capteurs de LibreHardwareMonitor",
             );
         }
 
-        self.con = Some(con);
+        self.source = Some(source);
         ProbeState::Ready
     }
 
-    fn sample(&mut self, out: &mut Reading) {
-        let Some(con) = &self.con else { return };
-        let Ok(rows) = con.raw_query::<Row>(QUERY) else {
-            return;
+    fn sample(&mut self, out: &mut Reading) -> Sampled {
+        let Some(rows) = self.source.as_ref().and_then(Source::rows) else {
+            return Sampled::Lost;
         };
+        harvest(&rows, out);
+        Sampled::Answered
+    }
+}
 
-        // Les identifiants ne sont pas ordonnes par la requete : on determine d'abord la
-        // carte retenue, puis on ne lit que ses capteurs.
-        let mut target: Option<String> = None;
-        for r in &rows {
-            let Some(id) = variant_string(r.get("Identifier")) else {
-                continue;
-            };
-            let Some(prefix) = instance_prefix(&id) else {
-                continue;
-            };
-            if target.as_deref().is_none_or(|t| prefix < t) {
-                target = Some(prefix.to_string());
-            }
+/// Le tri des capteurs, separe de leur lecture : c'est la seule partie qui merite d'etre
+/// eprouvee, et elle ne depend pas de la voie par laquelle les lignes sont arrivees.
+fn harvest(rows: &[SensorRow], out: &mut Reading) {
+    // Les identifiants n'arrivent pas ordonnes : on determine d'abord la carte retenue,
+    // puis on ne lit que ses capteurs.
+    let mut target: Option<&str> = None;
+    for r in rows {
+        let Some(prefix) = instance_prefix(&r.id) else {
+            continue;
+        };
+        if target.is_none_or(|t| prefix < t) {
+            target = Some(prefix);
         }
-        // Le separateur final evite que `/gpu-amd/1` capte les capteurs de `/gpu-amd/10`.
-        let Some(target) = target.map(|t| format!("{t}/")) else { return };
+    }
+    // Le separateur final evite que `/gpu-amd/1` capte les capteurs de `/gpu-amd/10`.
+    let Some(target) = target.map(|t| format!("{t}/")) else {
+        return;
+    };
 
-        // « GPU Core » est la mesure de reference. Les replis existent parce qu'AMD ne
-        // publie pas la meme liste selon la generation : hot spot sans core sur certaines
-        // RDNA, PPT au lieu de Package ailleurs.
-        let mut core_temp: Option<f64> = None;
-        let mut any_temp: Option<f64> = None;
-        let mut board_power: Option<f64> = None;
-        let mut core_power: Option<f64> = None;
+    // « GPU Core » est la mesure de reference. Les replis existent parce qu'AMD ne publie
+    // pas la meme liste selon la generation : hot spot sans core sur certaines RDNA, PPT
+    // au lieu de Package ailleurs.
+    let mut core_temp: Option<f64> = None;
+    let mut any_temp: Option<f64> = None;
+    let mut board_power: Option<f64> = None;
+    let mut core_power: Option<f64> = None;
 
-        for r in &rows {
-            let Some(id) = variant_string(r.get("Identifier")) else {
-                continue;
-            };
-            if !id.starts_with(&target) {
-                continue;
-            }
-            let Some(value) = variant_f64(r.get("Value")) else {
-                continue;
-            };
-            let kind = variant_string(r.get("SensorType")).unwrap_or_default();
-            let name = variant_string(r.get("Name")).unwrap_or_default().to_lowercase();
+    for r in rows {
+        if !r.id.starts_with(&target) {
+            continue;
+        }
 
-            match kind.as_str() {
-                "Temperature" => {
-                    if name.contains("core") {
-                        core_temp = Some(value);
-                    } else {
-                        any_temp.get_or_insert(value);
-                    }
+        match r.kind.as_str() {
+            "Temperature" => {
+                if r.name.contains("core") {
+                    core_temp = Some(r.value);
+                } else {
+                    any_temp.get_or_insert(r.value);
                 }
-                "Power" => {
-                    if name.contains("package") || name.contains("ppt") {
-                        board_power = Some(value);
-                    } else if name.contains("core") {
-                        core_power = Some(value);
-                    }
-                }
-                "Clock" if name.contains("core") => out.offer(Metric::GpuClockMhz, value, ID),
-                "Load" if name.contains("core") => out.offer(Metric::GpuUtilPct, value, ID),
-                _ => {}
             }
+            "Power" => {
+                if r.name.contains("package") || r.name.contains("ppt") {
+                    board_power = Some(r.value);
+                } else if r.name.contains("core") {
+                    core_power = Some(r.value);
+                }
+            }
+            "Clock" if r.name.contains("core") => out.offer(Metric::GpuClockMhz, r.value, ID),
+            "Load" if r.name.contains("core") => out.offer(Metric::GpuUtilPct, r.value, ID),
+            _ => {}
         }
+    }
 
-        if let Some(t) = core_temp.or(any_temp) {
-            out.offer(Metric::GpuTempC, t, ID);
-        }
-        if let Some(p) = board_power.or(core_power) {
-            out.offer(Metric::GpuPowerW, p, ID);
-        }
+    if let Some(t) = core_temp.or(any_temp) {
+        out.offer(Metric::GpuTempC, t, ID);
+    }
+    if let Some(p) = board_power.or(core_power) {
+        out.offer(Metric::GpuPowerW, p, ID);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::instance_prefix;
+    use super::*;
+
+    fn row(id: &str, kind: &str, name: &str, value: f64) -> SensorRow {
+        SensorRow {
+            id: id.into(),
+            kind: kind.into(),
+            name: name.to_lowercase(),
+            value,
+        }
+    }
+
+    /// Les quatre grandeurs de la carte, telles qu'un LHM a jour les publie.
+    #[test]
+    fn reads_the_four_gpu_metrics() {
+        let rows = [
+            row("/gpu-amd/0/temperature/0", "Temperature", "GPU Core", 49.0),
+            row("/gpu-amd/0/power/0", "Power", "GPU Package", 142.0),
+            row("/gpu-amd/0/clock/0", "Clock", "GPU Core", 2105.0),
+            row("/gpu-amd/0/load/0", "Load", "GPU Core", 37.0),
+        ];
+        let mut out = Reading::default();
+        harvest(&rows, &mut out);
+
+        assert_eq!(out.get(Metric::GpuTempC), Some(49.0));
+        assert_eq!(out.get(Metric::GpuPowerW), Some(142.0));
+        assert_eq!(out.get(Metric::GpuClockMhz), Some(2105.0));
+        assert_eq!(out.get(Metric::GpuUtilPct), Some(37.0));
+    }
+
+    /// Une seule carte, celle de plus petit index : melanger deux GPU donnerait une
+    /// temperature et une puissance qui ne decrivent aucune piece reelle.
+    #[test]
+    fn keeps_a_single_card() {
+        let rows = [
+            row("/gpu-amd/1/temperature/0", "Temperature", "GPU Core", 70.0),
+            row("/gpu-amd/0/temperature/0", "Temperature", "GPU Core", 49.0),
+        ];
+        let mut out = Reading::default();
+        harvest(&rows, &mut out);
+
+        assert_eq!(out.get(Metric::GpuTempC), Some(49.0));
+    }
 
     #[test]
     fn keeps_the_hardware_instance_only() {

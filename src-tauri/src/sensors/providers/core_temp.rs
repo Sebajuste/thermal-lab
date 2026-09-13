@@ -5,7 +5,9 @@
 //! avoir ete lance en administrateur pour que son pilote soit charge.
 
 use crate::sensors::metric::{Metric, Reading};
-use crate::sensors::provider::{ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind};
+use crate::sensors::provider::{
+    ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
+};
 use crate::sensors::shared_memory::{c_string, MappedView};
 
 const ID: &str = "core-temp";
@@ -89,8 +91,10 @@ impl Provider for CoreTempProvider {
         }
     }
 
-    fn sample(&mut self, out: &mut Reading) {
-        let Some(d) = self.read() else { return };
+    fn sample(&mut self, out: &mut Reading) -> Sampled {
+        let Some(d) = self.read() else {
+            return Sampled::Lost;
+        };
 
         let cores = (d.core_count as usize)
             .saturating_mul(d.cpu_count.max(1) as usize)
@@ -126,6 +130,8 @@ impl Provider for CoreTempProvider {
         if !name.is_empty() && out.cpu_name.is_none() {
             out.cpu_name = Some(name);
         }
+
+        Sampled::Answered
     }
 }
 

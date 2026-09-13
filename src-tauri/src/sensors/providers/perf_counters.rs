@@ -12,7 +12,9 @@
 use wmi::WMIConnection;
 
 use crate::sensors::metric::{Metric, Reading};
-use crate::sensors::provider::{ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind};
+use crate::sensors::provider::{
+    ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
+};
 use crate::sensors::wmi_context::{variant_f64, variant_string, Row};
 
 const ID: &str = "perf-counters";
@@ -69,10 +71,12 @@ impl Provider for PerfCountersProvider {
         }
     }
 
-    fn sample(&mut self, out: &mut Reading) {
-        let Some(con) = &self.con else { return };
+    fn sample(&mut self, out: &mut Reading) -> Sampled {
+        let Some(con) = &self.con else {
+            return Sampled::Lost;
+        };
         let Ok(rows) = con.raw_query::<Row>(QUERY) else {
-            return;
+            return Sampled::Lost;
         };
 
         let mut max_core: Option<f64> = None;
@@ -98,5 +102,7 @@ impl Provider for PerfCountersProvider {
         if let Some(m) = max_core {
             out.offer(Metric::CpuMaxCorePct, m, ID);
         }
+
+        Sampled::Answered
     }
 }
