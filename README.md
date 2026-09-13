@@ -165,3 +165,7 @@ monitoring sont des situations normales, pas des erreurs.
   de chargement ou un menu fausse les moyennes — basculer en jeu, scène stable.
 - Pas de mesure d'images par seconde : la constater demande un overlay type RTSS, hors
   périmètre de ce POC.
+
+## Licence
+
+[MIT](LICENSE).
