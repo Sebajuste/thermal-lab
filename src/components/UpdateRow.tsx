@@ -1,5 +1,11 @@
-import { useCallback, useState } from "react";
-import { checkUpdate, installUpdate, type UpdateInfo } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import {
+  checkUpdate,
+  installUpdate,
+  type UpdateInfo,
+  type UpdateProgress,
+} from "../api";
 import Icon from "./Icon";
 
 interface Props {
@@ -21,6 +27,14 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
   // Distinct de `update === null` : au premier rendu on ne sait rien, après une
   // recherche infructueuse on sait que rien n'attend. Les deux méritent un mot différent.
   const [checked, setChecked] = useState(false);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+
+  useEffect(() => {
+    const off = listen<UpdateProgress>("update-progress", (e) =>
+      setProgress(e.payload),
+    );
+    return () => void off.then((f) => f());
+  }, []);
 
   const check = useCallback(async () => {
     if (busy) return;
@@ -44,8 +58,14 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
     } catch (e) {
       onError(String(e));
       setBusy(null);
+      setProgress(null);
     }
   }, [busy, onError]);
+
+  const pct =
+    progress && progress.total
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : null;
 
   return (
     <div className="update">
@@ -60,9 +80,11 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
             onClick={() => void install()}
             title={update.notes ?? undefined}
           >
-            {busy === "install"
-              ? "Installation…"
-              : `Installer la v${update.version} et relancer`}
+            {busy !== "install"
+              ? `Installer la v${update.version} et relancer`
+              : pct !== null
+                ? `Téléchargement ${pct} %`
+                : `Téléchargement ${(progress ? progress.downloaded / 1e6 : 0).toFixed(1)} Mo`}
           </button>
         ) : (
           <button
@@ -79,7 +101,19 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
         )}
       </div>
 
-      {update && (
+      {busy === "install" && (
+        // Barre déterminée quand la taille est annoncée, rayures animées sinon : une
+        // barre pleine à 100 % qui ne bouge plus ressemble à un blocage.
+        <div
+          className={pct === null ? "update-bar unknown" : "update-bar"}
+          role="progressbar"
+          aria-valuenow={pct ?? undefined}
+        >
+          <span style={pct === null ? undefined : { width: `${pct}%` }} />
+        </div>
+      )}
+
+      {update && busy !== "install" && (
         <div className="banner inline">
           <Icon name="launch" size={14} />
           <span>

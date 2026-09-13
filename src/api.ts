@@ -146,6 +146,13 @@ export const readUiState = () => invoke<UiState>("ui_state");
 export const setPinned = (pinned: boolean) => invoke<void>("set_pinned", { pinned });
 export const setAutostart = (on: boolean) => invoke<boolean>("set_autostart", { on });
 
+/** Miroir de `update::Progress`, poussé par l'événement `update-progress`. */
+export interface UpdateProgress {
+  downloaded: number;
+  /** `null` quand le serveur n'annonce pas la taille : la barre devient indéterminée. */
+  total: number | null;
+}
+
 /** `null` quand l'application est à jour. Remonte l'erreur : la recherche a été demandée. */
 export const checkUpdate = () => invoke<UpdateInfo | null>("check_update");
 
