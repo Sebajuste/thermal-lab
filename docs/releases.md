@@ -23,6 +23,16 @@ NSIS, crée la release GitHub, y attache l'installateur et génère `latest.json
 Publier à chaque commit aurait deux coûts : une compilation Rust complète pour une
 correction de typo, et une notification de mise à jour à tout le monde pour la même.
 
+## Une version de Rust, epinglee
+
+`rust-toolchain.toml` fixe la version du compilateur pour le poste de developpement, la
+CI et la release. Deux raisons, dans cet ordre : le binaire publie devient reproductible,
+et `stable` cesse de designer une version differente selon le jour et la machine — ce qui
+faisait echouer clippy en CI sur du code que personne n'avait touche.
+
+La bumper est un geste explicite : changer le `channel`, verifier que la CI passe, et les
+nouvelles regles arrivent d'un coup plutot qu'un matin au hasard.
+
 ## Le canal de mise à jour
 
 L'application interroge au lancement :
