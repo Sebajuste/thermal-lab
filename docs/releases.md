@@ -13,9 +13,23 @@ chaque poussée sur `main`, mais s'arrête aussitôt si le tag `v<version>` exis
 Publier revient donc à un seul geste :
 
 ```
-# bumper "version" dans src-tauri/tauri.conf.json, puis
-git commit -am "v0.2.0" && git push
+npm run bump minor        # ou patch, major, ou un numero explicite : 0.2.0
 ```
+
+Trois fichiers portent le numero — `tauri.conf.json`, `Cargo.toml`, `package.json`.
+Seul le premier decide : le codegen de Tauri n'utilise `CARGO_PKG_VERSION` que si le
+champ y est absent. Les deux autres n'en suivent pas moins, et la CI echoue s'ils
+divergent : un depot qui se contredit sur sa propre version fait douter du reste.
+
+Quel niveau ? Semver, lu du point de vue de celui qui utilise l'application — la
+question n'est pas « l'API change-t-elle » mais « l'utilisateur doit-il faire
+quelque chose ». Un correctif est un *patch*, un ajout retrocompatible un *minor*,
+et un *major* se reserve a ce qui demande une intervention : identifiant change,
+reglages perdus, fournisseur retire.
+
+**Un numero deja publie ne se reutilise jamais.** L'updater compare les versions :
+une release qui n'est pas strictement superieure est invisible pour les installations
+existantes.
 
 Le workflow compile sur `windows-latest`, exécute les tests Rust, construit l'installateur
 NSIS, crée la release GitHub, y attache l'installateur et génère `latest.json`.

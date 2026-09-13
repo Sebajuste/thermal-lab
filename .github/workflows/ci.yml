@@ -31,6 +31,10 @@ jobs:
 
       - run: npm ci
 
+      # Trois fichiers portent le numero de version. En bumper un et oublier les autres
+      # ne casse rien et n'alerte personne : c'est exactement ce qui doit etre attrape ici.
+      - run: npm run check:versions
+
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
       # `--all-targets` couvre aussi les tests : du code mort y passe inapercu sinon.
