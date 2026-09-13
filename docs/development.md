@@ -11,7 +11,8 @@ plateforme.
 ```bash
 npm install
 npm run tauri:dev      # application en développement, rechargement à chaud
-npm run tauri:build    # binaire + installateur
+npm run tauri:exe      # binaire release seul, sans installateur ni clef de signature
+npm run tauri:build    # binaire + installateur — exige la clef de signature
 npm run build          # frontend seul : tsc puis vite build
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture   # voir les relevés réels
@@ -102,6 +103,28 @@ raison exacte est affichée sous le tableau des fournisseurs.
 
 **Le badge dit « repos » en permanence.** Charge CPU sous 15 % : normal au bureau, la
 mesure ne conclut que sous charge.
+
+**`npm run tauri:build` échoue sur une clef absente.** `createUpdaterArtifacts` est à
+`true` dans `tauri.conf.json` : produire un installateur signe aussi les artefacts de
+mise à jour, ce qui exige `TAURI_SIGNING_PRIVATE_KEY`. Cette clef est un secret du dépôt,
+posée par le workflow de release et par lui seul — elle n'a pas à exister sur une machine
+de développement. Pour obtenir un binaire testable en local : **`npm run tauri:exe`**, qui
+compile en release sans bundler ni signer. L'exécutable atterrit dans
+`src-tauri/target/release/`.
+
+**La fenêtre de `tauri:dev` reste blanche.** Vite laissé sur son hôte par défaut
+n'écoutait que sur `[::1]`, quand la WebView résout `localhost` en IPv4 et tombe sur une
+connexion refusée — sans message, ni côté Vite ni côté WebView. Les deux bouts sont
+désormais fixés sur `127.0.0.1`, dans `vite.config.ts` et dans `devUrl`. Pour trancher en
+cas de rechute :
+
+```bash
+netstat -ano | grep ":1420"                 # sur quelle pile Vite écoute
+curl -o /dev/null -w "%{http_code}" http://127.0.0.1:1420/
+```
+
+C'est le même piège que celui documenté dans `sensors/lhm.rs` pour le serveur de
+LibreHardwareMonitor : sur Windows, `localhost` n'est pas un synonyme de `127.0.0.1`.
 
 **Le démarrage automatique ne prend pas.** C'est une tâche planifiée nommée
 « Thermal Lab » : `schtasks /Query /TN "Thermal Lab"` pour la voir, le Planificateur de
