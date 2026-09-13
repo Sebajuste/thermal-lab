@@ -75,6 +75,18 @@ Tant que `pubkey` est vide, l'application démarre et cherche normalement : la c
 qu'au moment de vérifier le paquet téléchargé. L'échec n'arriverait donc qu'à
 l'installation, au pire moment. À renseigner avant la première release.
 
+## Le piege : `createUpdaterArtifacts`
+
+`bundle.createUpdaterArtifacts` vaut **`false`** par defaut. Sans lui, le bundler produit
+l'installateur et s'arrete la : ni signatures, ni paquets de mise a jour. Le build
+reussit, la release se cree, l'installateur s'y attache — et `latest.json` manque, sans
+qu'aucune etape n'ait echoue. C'est ce qui est arrive a la v0.1.0, dont le seul indice
+tenait a une ligne de log : « Signature not found for the updater JSON. Skipping
+upload... ».
+
+Le symptome a distance est muet aussi : les installations existantes interrogent un
+`latest.json` absent, recoivent un 404, et concluent qu'elles sont a jour.
+
 ## L'installateur : `currentUser`
 
 L'installateur NSIS écrit dans `%LOCALAPPDATA%`, pour l'utilisateur courant seulement.
