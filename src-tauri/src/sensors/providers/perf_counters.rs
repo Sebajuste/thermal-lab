@@ -44,7 +44,10 @@ impl Provider for PerfCountersProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             id: ID,
-            name: "Compteurs de performance Windows",
+            name: crate::t!(
+                "Windows performance counters",
+                "Compteurs de performance Windows"
+            ),
             kind: ProviderKind::Builtin,
             provides: PROVIDES,
             url: None,
@@ -54,14 +57,17 @@ impl Provider for PerfCountersProvider {
     fn probe(&mut self, ctx: &ProbeContext<'_>) -> ProbeState {
         let Some(wmi) = ctx.wmi else {
             return ProbeState::Failed {
-                error: "COM indisponible".into(),
+                error: crate::t!("COM unavailable", "COM indisponible").into(),
             };
         };
         match wmi.connect(NAMESPACE) {
             Err(e) => ProbeState::Failed { error: e },
             Ok(con) => match con.raw_query::<Row>(QUERY) {
                 Err(e) => ProbeState::Failed {
-                    error: format!("classe de compteurs illisible : {e}"),
+                    error: crate::t!(
+                        format!("counter class unreadable: {e}"),
+                        format!("classe de compteurs illisible : {e}")
+                    ),
                 },
                 Ok(_) => {
                     self.con = Some(con);

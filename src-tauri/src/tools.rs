@@ -332,7 +332,10 @@ pub fn statuses() -> BTreeMap<&'static str, ToolStatus> {
 /// chaine venue de l'interface, et `ShellExecute` ouvrirait aussi bien un executable.
 pub fn open_url(url: &str) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err(format!("adresse refusée : {url}"));
+        return Err(crate::t!(
+            format!("address refused: {url}"),
+            format!("adresse refusée : {url}")
+        ));
     }
 
     let target = wide(url);
@@ -354,7 +357,10 @@ pub fn open_url(url: &str) -> Result<(), String> {
 
     match code {
         c if c > 32 => Ok(()),
-        c => Err(format!("ouverture impossible (code {c})")),
+        c => Err(crate::t!(
+            format!("cannot open (code {c})"),
+            format!("ouverture impossible (code {c})")
+        )),
     }
 }
 
@@ -399,9 +405,18 @@ pub fn launch(tool_id: &str) -> Result<(), String> {
     // code d'erreur historique.
     match code {
         c if c > 32 => Ok(()),
-        5 => Err(format!("{} : élévation non accordée", t.name)),
-        2 | 3 => Err(format!("{} : introuvable à l'emplacement connu", t.name)),
-        c => Err(format!("{} : lancement impossible (code {c})", t.name)),
+        5 => Err(crate::t!(
+            format!("{}: elevation declined", t.name),
+            format!("{} : élévation non accordée", t.name)
+        )),
+        2 | 3 => Err(crate::t!(
+            format!("{}: not found at its known location", t.name),
+            format!("{} : introuvable à l'emplacement connu", t.name)
+        )),
+        c => Err(crate::t!(
+            format!("{}: cannot launch (code {c})", t.name),
+            format!("{} : lancement impossible (code {c})", t.name)
+        )),
     }
 }
 

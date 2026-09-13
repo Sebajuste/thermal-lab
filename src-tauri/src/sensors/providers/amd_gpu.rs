@@ -60,7 +60,10 @@ impl Provider for AmdGpuProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             id: ID,
-            name: "GPU AMD (LibreHardwareMonitor)",
+            name: crate::t!(
+                "AMD GPU (LibreHardwareMonitor)",
+                "GPU AMD (LibreHardwareMonitor)"
+            ),
             kind: ProviderKind::External,
             provides: PROVIDES,
             url: Some("https://github.com/LibreHardwareMonitor/LibreHardwareMonitor"),
@@ -71,7 +74,7 @@ impl Provider for AmdGpuProvider {
         self.source = None;
 
         let Some(source) = Source::open(ctx.wmi) else {
-            return ProbeState::unavailable(lhm::UNAVAILABLE_REASON, lhm::UNAVAILABLE_HINT);
+            return ProbeState::unavailable(lhm::unavailable_reason(), lhm::unavailable_hint());
         };
 
         // LHM present ne veut pas dire carte AMD presente : sans capteur `/gpu-amd/`,
@@ -81,9 +84,10 @@ impl Provider for AmdGpuProvider {
             .is_some_and(|rows| rows.iter().any(|r| instance_prefix(&r.id).is_some()));
 
         if !has_amd {
-            return ProbeState::unavailable_only(
-                "aucun GPU AMD parmi les capteurs de LibreHardwareMonitor",
-            );
+            return ProbeState::unavailable_only(crate::t!(
+                "no AMD GPU among the LibreHardwareMonitor sensors",
+                "aucun GPU AMD parmi les capteurs de LibreHardwareMonitor"
+            ));
         }
 
         self.source = Some(source);

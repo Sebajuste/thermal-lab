@@ -69,7 +69,7 @@ fn extract_name(text: &str) -> String {
     text.rsplit_once('(')
         .and_then(|(_, rest)| rest.split_once(')'))
         .map(|(name, _)| name.trim().to_string())
-        .unwrap_or_else(|| "(sans nom)".to_string())
+        .unwrap_or_else(|| crate::t!("(unnamed)", "(sans nom)").to_string())
 }
 
 fn powercfg(args: &[&str]) -> Result<String, String> {
@@ -77,16 +77,21 @@ fn powercfg(args: &[&str]) -> Result<String, String> {
         .args(args)
         .creation_flags(CREATE_NO_WINDOW)
         .output()
-        .map_err(|e| format!("powercfg introuvable : {e}"))?;
+        .map_err(|e| {
+            crate::t!(
+                format!("powercfg not found: {e}"),
+                format!("powercfg introuvable : {e}")
+            )
+        })?;
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let std = String::from_utf8_lossy(&out.stdout);
         let msg = if err.trim().is_empty() { std } else { err };
-        return Err(format!(
-            "powercfg {} a echoue : {}",
-            args.join(" "),
-            msg.trim()
+        let (cmd, msg) = (args.join(" "), msg.trim());
+        return Err(crate::t!(
+            format!("powercfg {cmd} failed: {msg}"),
+            format!("powercfg {cmd} a echoue : {msg}")
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -94,7 +99,12 @@ fn powercfg(args: &[&str]) -> Result<String, String> {
 
 fn active_scheme() -> Result<(String, String), String> {
     let out = powercfg(&["/getactivescheme"])?;
-    let guid = extract_guid(&out).ok_or("GUID du schema actif introuvable")?;
+    let guid = extract_guid(&out).ok_or_else(|| {
+        crate::t!(
+            "active scheme GUID not found",
+            "GUID du schema actif introuvable"
+        )
+    })?;
     Ok((guid, extract_name(&out)))
 }
 
@@ -153,9 +163,11 @@ pub fn state() -> Result<PowerState, String> {
 /// mais laisser les deux coherentes evite un comportement different sur onduleur.
 pub fn set_optimized(on: bool) -> Result<PowerState, String> {
     if !is_elevated() {
-        return Err(
-            "droits administrateur requis pour modifier le schema d'alimentation".to_string(),
-        );
+        return Err(crate::t!(
+            "administrator rights are required to change the power scheme",
+            "droits administrateur requis pour modifier le schema d'alimentation"
+        )
+        .to_string());
     }
 
     let (guid, _) = active_scheme()?;

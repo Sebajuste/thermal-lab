@@ -66,7 +66,13 @@ pub fn collect(hub: &SensorHub) -> Capabilities {
         Ok(s) if s.elevated => (true, None),
         Ok(_) => (
             false,
-            Some("droits administrateur requis pour modifier le schema d'alimentation".into()),
+            Some(
+                crate::t!(
+                    "administrator rights are required to change the power scheme",
+                    "droits administrateur requis pour modifier le schema d'alimentation"
+                )
+                .into(),
+            ),
         ),
         Err(e) => (false, Some(e)),
     };

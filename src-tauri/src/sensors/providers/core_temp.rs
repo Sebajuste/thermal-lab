@@ -75,16 +75,27 @@ impl Provider for CoreTempProvider {
 
         match self.section {
             None => ProbeState::unavailable(
-                "Core Temp ne tourne pas",
-                "Lancer Core Temp en administrateur.",
+                crate::t!("Core Temp is not running", "Core Temp ne tourne pas"),
+                crate::t!(
+                    "Run Core Temp as administrator.",
+                    "Lancer Core Temp en administrateur."
+                ),
             ),
             Some(_) => match self.read() {
                 // Section presente mais illisible : disposition inattendue, pas une absence.
                 None => ProbeState::Failed {
-                    error: "section presente mais structure illisible".into(),
+                    error: crate::t!(
+                        "section present but its layout is unreadable",
+                        "section presente mais structure illisible"
+                    )
+                    .into(),
                 },
                 Some(d) if c_string(&d.cpu_name).is_empty() => ProbeState::Failed {
-                    error: "nom de CPU vide : disposition memoire inattendue".into(),
+                    error: crate::t!(
+                        "empty CPU name: unexpected memory layout",
+                        "nom de CPU vide : disposition memoire inattendue"
+                    )
+                    .into(),
                 },
                 Some(_) => ProbeState::Ready,
             },

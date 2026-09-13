@@ -6,6 +6,7 @@ import {
   type UpdateInfo,
   type UpdateProgress,
 } from "../api";
+import { t } from "../i18n";
 import Icon from "./Icon";
 
 interface Props {
@@ -89,7 +90,7 @@ export default function UpdateRow({
   return (
     <div className="update">
       <div className="update-line">
-        <span className="mono" title="Version installée">
+        <span className="mono" title={t.installedVersion}>
           v{version}
         </span>
         {update ? (
@@ -100,10 +101,12 @@ export default function UpdateRow({
             title={update.notes ?? undefined}
           >
             {!installing
-              ? `Installer la v${update.version} et relancer`
+              ? t.installAndRestart(update.version)
               : pct !== null
-                ? `Téléchargement ${pct} %`
-                : `Téléchargement ${(progress ? progress.downloaded / 1e6 : 0).toFixed(1)} Mo`}
+                ? t.downloadingPct(pct)
+                : t.downloadingMb(
+                    (progress ? progress.downloaded / 1e6 : 0).toFixed(1),
+                  )}
           </button>
         ) : (
           <button
@@ -112,10 +115,10 @@ export default function UpdateRow({
             onClick={() => void check()}
           >
             {busy === "check"
-              ? "Recherche…"
+              ? t.checking
               : checked
-                ? "À jour — chercher encore"
-                : "Rechercher une mise à jour"}
+                ? t.upToDate
+                : t.checkForUpdate}
           </button>
         )}
       </div>
@@ -136,9 +139,8 @@ export default function UpdateRow({
         <div className="banner inline">
           <Icon name="launch" size={14} />
           <span>
-            La v{update.version} remplacera la v{update.current}. L'application se
-            ferme et se rouvre ; le schéma d'alimentation reste en l'état.
-            {auto && " Sans clic, elle s'installera une fois ce panneau fermé."}
+            {t.updateNotice(update.version, update.current)}
+            {auto && t.updateAutoNotice}
           </span>
         </div>
       )}

@@ -152,7 +152,7 @@ pub fn show(app: &AppHandle) {
 /// sans le moindre message. Une commande echoue bruyamment, ce qui vaut mieux.
 pub fn start_drag(app: &AppHandle) -> Result<(), String> {
     window(app)
-        .ok_or_else(|| "fenetre absente".to_string())?
+        .ok_or_else(|| crate::t!("window missing", "fenetre absente").to_string())?
         .start_dragging()
         .map_err(|e| format!("deplacement impossible : {e}"))
 }

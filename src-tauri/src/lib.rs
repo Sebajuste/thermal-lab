@@ -1,6 +1,7 @@
 mod autostart;
 mod capabilities;
 mod flyout;
+mod i18n;
 mod phases;
 mod power;
 mod settings;
@@ -112,6 +113,13 @@ fn ui_state(app: AppHandle) -> UiState {
         auto_update: app.state::<Settings>().prefs().auto_update,
         version: app.package_info().version.to_string(),
     }
+}
+
+/// Lue avant le premier rendu : les libelles sont figes a la construction de plusieurs
+/// tables de module, qui ne peuvent pas attendre un etat React.
+#[tauri::command]
+fn ui_lang() -> i18n::Lang {
+    i18n::lang()
 }
 
 #[tauri::command]
@@ -227,6 +235,7 @@ pub fn run() {
             hide_window,
             quit_app,
             ui_state,
+            ui_lang,
             set_pinned,
             set_autostart,
             set_auto_update,
@@ -234,5 +243,5 @@ pub fn run() {
             update::install_update
         ])
         .run(tauri::generate_context!())
-        .expect("erreur au lancement de l'application Tauri");
+        .expect("Tauri failed to start");
 }

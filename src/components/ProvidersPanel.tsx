@@ -6,12 +6,11 @@ import {
   type ProviderStatus,
   type ToolStatus,
 } from "../api";
+import { t } from "../i18n";
 import Icon from "./Icon";
 
-const KIND_LABEL: Record<ProviderStatus["kind"], string> = {
-  builtin: "natif",
-  external: "outil tiers",
-};
+const kindLabel = (kind: ProviderStatus["kind"]) =>
+  kind === "builtin" ? t.kindBuiltin : t.kindExternal;
 
 /**
  * L'état affiché croise deux informations qui ne disent pas la même chose : le
@@ -20,21 +19,21 @@ const KIND_LABEL: Record<ProviderStatus["kind"], string> = {
  */
 type Shown = "ready" | "failed" | "started" | "stopped" | "missing" | "unknown";
 
-const PILL: Record<Shown, { text: string; kind: string; why: string }> = {
-  ready: { text: "actif", kind: "ok", why: "Mesure reçue." },
-  failed: { text: "erreur", kind: "err", why: "Réponse inattendue." },
-  started: {
-    text: "lancé",
-    kind: "warn",
-    why: "Tourne, mais ne publie aucune mesure.",
-  },
-  stopped: { text: "arrêté", kind: "off", why: "Installé, non lancé." },
-  missing: { text: "absent", kind: "off", why: "Introuvable." },
-  unknown: {
-    text: "introuvable",
-    kind: "off",
-    why: "Outil portable : détectable seulement s'il tourne.",
-  },
+const pill = (state: Shown): { text: string; kind: string; why: string } => {
+  switch (state) {
+    case "ready":
+      return { text: t.pillReady, kind: "ok", why: t.pillReadyWhy };
+    case "failed":
+      return { text: t.pillFailed, kind: "err", why: t.pillFailedWhy };
+    case "started":
+      return { text: t.pillStarted, kind: "warn", why: t.pillStartedWhy };
+    case "stopped":
+      return { text: t.pillStopped, kind: "off", why: t.pillStoppedWhy };
+    case "missing":
+      return { text: t.pillMissing, kind: "off", why: t.pillMissingWhy };
+    case "unknown":
+      return { text: t.pillUnknown, kind: "off", why: t.pillUnknownWhy };
+  }
 };
 
 function shown(p: ProviderStatus, tool?: ToolStatus): Shown {
@@ -108,20 +107,20 @@ export default function ProvidersPanel({ caps, onChanged, onError }: Props) {
 
   return (
     <section className="panel">
-      <h2>Fournisseurs</h2>
+      <h2>{t.providers}</h2>
 
       <ul className="prov">
         {caps.providers.map((p) => {
           const tool = caps.tools[p.id];
           const state = shown(p, tool);
-          const pill = PILL[state];
+          const badge = pill(state);
           const note = detail(p, state, tool !== undefined);
           return (
             <li key={p.id}>
               <div className="prov-line">
                 <span
                   className="prov-name"
-                  title={`${KIND_LABEL[p.kind]} · ${p.provides.length} grandeurs${
+                  title={`${kindLabel(p.kind)} · ${t.metricCount(p.provides.length)}${
                     tool?.path ? `\n${tool.path}` : ""
                   }`}
                 >
@@ -138,14 +137,14 @@ export default function ProvidersPanel({ caps, onChanged, onError }: Props) {
                     className="chrome"
                     disabled={launching === tool.id}
                     onClick={() => void launch(tool)}
-                    aria-label={`Lancer ${tool.name}`}
-                    title={`Lancer ${tool.name} en administrateur`}
+                    aria-label={t.launch(tool.name)}
+                    title={t.launchAdmin(tool.name)}
                   >
                     <Icon name="launch" size={13} />
                   </button>
                 )}
-                <span className={`pill ${pill.kind}`} title={pill.why}>
-                  {pill.text}
+                <span className={`pill ${badge.kind}`} title={badge.why}>
+                  {badge.text}
                 </span>
               </div>
               {note && <div className="pill-note">{note}</div>}
@@ -156,7 +155,7 @@ export default function ProvidersPanel({ caps, onChanged, onError }: Props) {
 
       {missing.length > 0 && (
         <div className="missing">
-          <strong>Non mesuré ici :</strong>
+          <strong>{t.notMeasured}</strong>
           <ul>
             {missing.map((m) => (
               <li key={m.metric}>

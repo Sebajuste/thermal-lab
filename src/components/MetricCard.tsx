@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { t } from "../i18n";
 import StateBadge, { type Badge } from "./StateBadge";
 
 export type { Badge };
@@ -35,7 +36,7 @@ export default function MetricCard({
       <div className="card-note">{note ?? ""}</div>
       {children}
       {provider && (
-        <div className="card-source" title={`Mesure fournie par ${provider}`}>
+        <div className="card-source" title={t.measuredBy(provider)}>
           {provider}
         </div>
       )}

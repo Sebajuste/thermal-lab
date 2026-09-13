@@ -98,7 +98,12 @@ pub fn clear_legacy() {
 
 fn create_args() -> Result<Vec<String>, String> {
     let exe = std::env::current_exe()
-        .map_err(|e| format!("chemin de l'executable introuvable : {e}"))?
+        .map_err(|e| {
+            crate::t!(
+                format!("executable path not found: {e}"),
+                format!("chemin de l'executable introuvable : {e}")
+            )
+        })?
         .display()
         .to_string();
 
@@ -107,7 +112,13 @@ fn create_args() -> Result<Vec<String>, String> {
     let user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
         (Ok(domain), Ok(name)) => format!("{domain}\\{name}"),
         (_, Ok(name)) => name,
-        _ => return Err("compte utilisateur courant indeterminable".into()),
+        _ => {
+            return Err(crate::t!(
+                "current user account cannot be determined",
+                "compte utilisateur courant indeterminable"
+            )
+            .into())
+        }
     };
 
     Ok(vec![
@@ -147,7 +158,12 @@ fn run_direct(args: &[String]) -> Result<(), String> {
         .args(args)
         .creation_flags(CREATE_NO_WINDOW)
         .output()
-        .map_err(|e| format!("schtasks introuvable : {e}"))?;
+        .map_err(|e| {
+            crate::t!(
+                format!("schtasks not found: {e}"),
+                format!("schtasks introuvable : {e}")
+            )
+        })?;
 
     if out.status.success() {
         return Ok(());
@@ -155,7 +171,11 @@ fn run_direct(args: &[String]) -> Result<(), String> {
     let err = String::from_utf8_lossy(&out.stderr);
     let std = String::from_utf8_lossy(&out.stdout);
     let message = if err.trim().is_empty() { std } else { err };
-    Err(format!("schtasks a echoue : {}", message.trim()))
+    let message = message.trim();
+    Err(crate::t!(
+        format!("schtasks failed: {message}"),
+        format!("schtasks a echoue : {message}")
+    ))
 }
 
 fn quote(arg: &str) -> String {
@@ -190,8 +210,13 @@ fn run_elevated(args: &[String]) -> Result<(), String> {
     unsafe {
         if win::ShellExecuteExW(&mut info) == 0 {
             return Err(match win::GetLastError() {
-                win::ERROR_CANCELLED => "élévation non accordée".to_string(),
-                code => format!("élévation impossible (code {code})"),
+                win::ERROR_CANCELLED => {
+                    crate::t!("elevation declined", "élévation non accordée").to_string()
+                }
+                code => crate::t!(
+                    format!("elevation failed (code {code})"),
+                    format!("élévation impossible (code {code})")
+                ),
             });
         }
 
@@ -201,13 +226,22 @@ fn run_elevated(args: &[String]) -> Result<(), String> {
         win::CloseHandle(info.hProcess);
 
         if waited != win::WAIT_OBJECT_0 {
-            return Err("schtasks n'a pas rendu la main".into());
+            return Err(
+                crate::t!("schtasks did not return", "schtasks n'a pas rendu la main").into(),
+            );
         }
         if read == 0 {
-            return Err("code de sortie de schtasks illisible".into());
+            return Err(crate::t!(
+                "schtasks exit code unreadable",
+                "code de sortie de schtasks illisible"
+            )
+            .into());
         }
         if status != 0 {
-            return Err(format!("schtasks a echoue (code {status})"));
+            return Err(crate::t!(
+                format!("schtasks failed (code {status})"),
+                format!("schtasks a echoue (code {status})")
+            ));
         }
     }
     Ok(())

@@ -23,6 +23,7 @@ import {
   type Reading,
   type UpdateInfo,
 } from "./api";
+import { t } from "./i18n";
 import Icon from "./components/Icon";
 import MetricCard, { type Badge } from "./components/MetricCard";
 import PhaseTable from "./components/PhaseTable";
@@ -285,9 +286,9 @@ export default function App() {
     turboView === "boost"
       ? { text: "TURBO", kind: "hot" }
       : turboView === "capped"
-        ? { text: "plafonné", kind: "cool" }
+        ? { text: t.badgeCapped, kind: "cool" }
         : turboView === "idle"
-          ? { text: "repos", kind: "idle" }
+          ? { text: t.badgeIdle, kind: "idle" }
           : null;
 
   const spark = (m: MetricKey) => history.map((h) => val(h, m));
@@ -313,11 +314,8 @@ export default function App() {
             />
 
             <section className="panel">
-              <h2>Application</h2>
-              <label
-                className="check"
-                title="Tâche planifiée, exécutée en administrateur. Élévation demandée une fois. Elle vise cet exécutable : le déplacer décoche la case, la recocher inscrit le nouvel emplacement."
-              >
+              <h2>{t.application}</h2>
+              <label className="check" title={t.autostartHint}>
                 <input
                   type="checkbox"
                   checked={autostart}
@@ -325,21 +323,18 @@ export default function App() {
                   onChange={() => void toggleAutostart()}
                 />
                 <span>
-                  Démarrer avec Windows, en administrateur
+                  {t.autostart}
                   {autostartBusy && " …"}
                 </span>
               </label>
 
-              <label
-                className="check"
-                title="Recherche toutes les six heures, installation sans confirmation. Elle attend que le panneau soit fermé : l'application se relance seule."
-              >
+              <label className="check" title={t.autoUpdateHint}>
                 <input
                   type="checkbox"
                   checked={autoUpdate}
                   onChange={() => void toggleAutoUpdate()}
                 />
-                <span>Mettre à jour automatiquement</span>
+                <span>{t.autoUpdate}</span>
               </label>
 
               <UpdateRow
@@ -353,12 +348,12 @@ export default function App() {
               <button
                 className="ghost danger"
                 onClick={() => void quitApp()}
-                title="Le schéma d'alimentation reste en l'état"
+                title={t.quitHint}
               >
-                Quitter
+                {t.quit}
               </button>
               {power && (
-                <div className="mono" title="Schéma actif">
+                <div className="mono" title={t.activeScheme}>
                   PERFBOOSTMODE={power.boostMode} · PROCTHROTTLEMAX=
                   {power.throttleMax}%
                   <br />
@@ -373,11 +368,11 @@ export default function App() {
         return (
           <section className="grid">
             <MetricCard
-              title="Cœur max"
+              title={t.maxCore}
               value={fmt(maxCore, 0, " %")}
               provider={providerOf(reading, "cpuMaxCorePct")}
               badge={turboBadge}
-              hint="Cœur le plus rapide, en % du nominal. Au-delà de 100 : turbo."
+              hint={t.maxCoreHint}
               note={
                 maxCore !== null && nominal !== null
                   ? `≈ ${((nominal * maxCore) / 100).toFixed(0)} MHz`
@@ -388,28 +383,28 @@ export default function App() {
             </MetricCard>
 
             <MetricCard
-              title="Temp. CPU"
+              title={t.cpuTemp}
               value={fmt(val(reading, "cpuTempC"), 1, " °C")}
               provider={providerOf(reading, "cpuTempC")}
-              hint="Température de package (max des cœurs)."
+              hint={t.cpuTempHint}
             >
               <Sparkline values={spark("cpuTempC")} color="#ff6b6b" />
             </MetricCard>
 
             <MetricCard
-              title="Puis. CPU"
+              title={t.cpuPower}
               value={fmt(val(reading, "cpuPowerW"), 1, " W")}
               provider={providerOf(reading, "cpuPowerW")}
-              hint="Puissance du package."
+              hint={t.cpuPowerHint}
             >
               <Sparkline values={spark("cpuPowerW")} color="#f78fb3" />
             </MetricCard>
 
             <MetricCard
-              title="Charge CPU"
+              title={t.cpuLoad}
               value={fmt(val(reading, "cpuUtilPct"), 1, " %")}
               provider={providerOf(reading, "cpuUtilPct")}
-              hint="Occupation totale des cœurs."
+              hint={t.cpuLoadHint}
             >
               <Sparkline
                 values={spark("cpuUtilPct")}
@@ -420,20 +415,20 @@ export default function App() {
             </MetricCard>
 
             <MetricCard
-              title="Temp. GPU"
+              title={t.gpuTemp}
               value={fmt(val(reading, "gpuTempC"), 0, " °C")}
               provider={providerOf(reading, "gpuTempC")}
-              hint="Température et charge GPU."
-              note={fmt(val(reading, "gpuUtilPct"), 0, " % charge")}
+              hint={t.gpuTempHint}
+              note={fmt(val(reading, "gpuUtilPct"), 0, t.gpuLoadUnit)}
             >
               <Sparkline values={spark("gpuTempC")} color="#4fc3ff" />
             </MetricCard>
 
             <MetricCard
-              title="Puis. GPU"
+              title={t.gpuPower}
               value={fmt(val(reading, "gpuPowerW"), 1, " W")}
               provider={providerOf(reading, "gpuPowerW")}
-              hint="Puissance et fréquence GPU."
+              hint={t.gpuPowerHint}
               note={fmt(val(reading, "gpuClockMhz"), 0, " MHz")}
             >
               <Sparkline values={spark("gpuPowerW")} color="#7ee787" />
@@ -466,9 +461,9 @@ export default function App() {
           title={
             canToggle
               ? on
-                ? "Turbo bridé"
-                : "Brider le turbo"
-              : (caps?.powerBlockedReason ?? "indisponible")
+                ? t.turboCapped
+                : t.capTurbo
+              : (caps?.powerBlockedReason ?? t.powerUnavailable)
           }
         />
       </div>
@@ -477,7 +472,7 @@ export default function App() {
         <div
           className="banner err"
           onClick={() => setError(null)}
-          title="Masquer"
+          title={t.hide}
         >
           <Icon name="alert" size={14} />
           <span>{error}</span>
