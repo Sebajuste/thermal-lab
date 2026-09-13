@@ -1,0 +1,672 @@
+:root {
+  --bg: #0d1117;
+  --panel: #151b23;
+  --line: #232c38;
+  --text: #e6edf3;
+  --muted: #8b98a8;
+  --accent: #4fc3ff;
+  --good: #7ee787;
+  --warn: #ffb454;
+  --err: #ff6b6b;
+  /* Doit rester égal à SLIDE_MS dans SlideDeck.tsx. */
+  --slide: 260ms;
+  --slide-ease: cubic-bezier(0.22, 0.9, 0.28, 1);
+  /* Un état qui bascule : assez lent pour se voir, assez court pour ne pas retarder
+     la lecture de la mesure suivante. */
+  --state: 240ms;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    13px/1.45 "Segoe UI",
+    system-ui,
+    sans-serif;
+  user-select: none;
+  /* Fenêtre sans décoration : ce liseré lui rend un bord sur fond clair. */
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+/* La hauteur remonte jusqu'a `html` : sans cela `height: 100%` ne resout rien, la
+   fenetre se remplit par le contenu et la barre d'onglets flotte au-dessus du bas. */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.icon {
+  display: block;
+}
+
+/* Barre de titre — ce que Windows ne dessine plus */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex: none;
+  /* Seule prise de la fenêtre : autant que le curseur le dise. */
+  cursor: move;
+}
+
+.titlebar-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: none;
+  transition:
+    background var(--state) ease,
+    box-shadow var(--state) ease;
+}
+
+.state-dot.on {
+  background: var(--good);
+  box-shadow: 0 0 8px var(--good);
+}
+
+.chrome {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.chrome:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.chrome.active {
+  color: var(--accent);
+}
+
+.chrome.close:hover {
+  background: var(--err);
+  color: #fff;
+}
+
+/* En-tête : machine, schéma et interrupteur, sur une ligne */
+
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.head-info {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toggle {
+  flex: none;
+  position: relative;
+  width: 42px;
+  height: 23px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0b0f15;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.toggle .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform 0.15s,
+    background 0.15s;
+}
+
+.toggle.on {
+  border-color: var(--good);
+  background: rgba(126, 231, 135, 0.16);
+}
+
+.toggle.on .knob {
+  transform: translateX(19px);
+  background: var(--good);
+  box-shadow: 0 0 8px var(--good);
+}
+
+.toggle.busy .knob {
+  background: var(--warn);
+}
+
+.toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Navigation, en bas de fenêtre */
+
+.tabbar {
+  flex: none;
+  display: flex;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 42px;
+  margin-top: -1px;
+  background: transparent;
+  border: none;
+  border-top: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tab.active {
+  color: var(--accent);
+  border-top-color: var(--accent);
+}
+
+/* Contenu défilant, et glissement d'un onglet à l'autre */
+
+/* Les deux vues d'une transition se superposent : sans cela la sortante pousserait
+   l'entrante vers le bas au lieu de la croiser. */
+.deck {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.view.in-right {
+  animation: view-in-right var(--slide) var(--slide-ease) both;
+}
+
+.view.in-left {
+  animation: view-in-left var(--slide) var(--slide-ease) both;
+}
+
+.view.out-right {
+  animation: view-out-left var(--slide) var(--slide-ease) both;
+}
+
+.view.out-left {
+  animation: view-out-right var(--slide) var(--slide-ease) both;
+}
+
+/* La vue sortante ne doit plus rien intercepter : elle n'est là que le temps de
+   quitter le cadre. */
+.view[aria-hidden="true"] {
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Pleine largeur : les deux vues se croisent, l'une chasse l'autre. */
+@keyframes view-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes view-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes view-out-left {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes view-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.view::-webkit-scrollbar {
+  width: 8px;
+}
+
+.view::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 10px 12px 0;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.banner .icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.banner.inline {
+  margin: 10px 0 0;
+  cursor: default;
+}
+
+.banner.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.banner.err {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+/* Cartes de mesure */
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 11px;
+  min-width: 0;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.card-title {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition:
+    background-color var(--state) ease,
+    color var(--state) ease,
+    opacity var(--state) ease;
+}
+
+/* Largeur posée en pixels par `StateBadge` : c'est ce qui la rend interpolable. */
+.badge-swap {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  transition: width var(--state) var(--slide-ease);
+}
+
+.badge-label {
+  display: block;
+  animation: state-in var(--state) ease both;
+}
+
+/* Le libellé sortant quitte le flux : la largeur suit le nouveau, pas le plus long. */
+.badge-label.ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  animation-name: state-out;
+}
+
+@keyframes state-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes state-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.badge.hot {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--err);
+}
+
+.badge.cool {
+  background: rgba(126, 231, 135, 0.15);
+  color: var(--good);
+}
+
+.badge.idle {
+  background: rgba(139, 152, 168, 0.15);
+  color: var(--muted);
+}
+
+.card-value {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 4px 0 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hauteur réservée même vide : sans elle, une carte sans complément chiffré
+   désaligne sa voisine. */
+.card-note {
+  min-height: 16px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-source {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.spark {
+  width: 100%;
+  display: block;
+}
+
+.spark-empty {
+  width: 100%;
+}
+
+/* Panneaux */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.view > * + .panel,
+.panel + .panel {
+  margin-top: 12px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel-head .hint {
+  margin: 0;
+}
+
+h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ghost:hover {
+  color: var(--text);
+}
+
+.ghost.danger:hover {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 6px 0 10px;
+}
+
+/* Comparatif */
+
+.cmp {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.cmp th,
+.cmp td {
+  text-align: left;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cmp th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.cmp th:not(:first-child) {
+  text-align: right;
+}
+
+.cmp .num {
+  text-align: right;
+}
+
+.cmp .good {
+  color: var(--good);
+}
+
+/* Fournisseurs */
+
+.prov {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.prov li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.prov li:last-child {
+  border-bottom: none;
+}
+
+.prov-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prov-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prov-name a {
+  color: var(--accent);
+}
+
+.pill {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  transition:
+    background var(--state) ease,
+    color var(--state) ease;
+}
+
+.pill.ok {
+  background: rgba(126, 231, 135, 0.15);
+  color: var(--good);
+}
+
+.pill.off {
+  background: rgba(139, 152, 168, 0.15);
+  color: var(--muted);
+}
+
+.pill.err {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--err);
+}
+
+.pill.warn {
+  background: rgba(255, 180, 84, 0.15);
+  color: var(--warn);
+}
+
+.pill-note {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.hint-line {
+  margin-top: 2px;
+  color: var(--warn);
+}
+
+.missing {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.missing ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.missing code {
+  color: var(--text);
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+/* Réglages de l'application */
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.check input {
+  accent-color: var(--accent);
+}
+
+.mono {
+  margin-top: 10px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: var(--muted);
+  word-break: break-all;
+  user-select: text;
+}
+
+/* Qui a désactivé le mouvement au niveau du système change d'onglet sans glissement. */
+@media (prefers-reduced-motion: reduce) {
+  .view {
+    animation-duration: 1ms !important;
+  }
+}

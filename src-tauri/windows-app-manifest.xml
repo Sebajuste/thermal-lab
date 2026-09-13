@@ -1,0 +1,42 @@
+<!--
+  Manifeste applicatif, pose sur les seules compilations de release (voir build.rs).
+
+  Reprend la dependance Common-Controls du manifeste par defaut de tauri-build : la
+  remplacer sans la reconduire priverait les dialogues natifs de leur theme.
+
+  Niveau demande : highestAvailable, et non requireAdministrator. Sur un compte
+  administrateur les deux elevent a l'identique, mais sur un compte standard le second
+  refuserait de demarrer, alors que le premier laisse l'application tourner sans
+  elevation. Or elle sait exactement quoi faire dans ce cas : mesurer, et expliquer
+  pourquoi l'interrupteur est hors service. Interdire le lancement jetterait ce travail.
+
+  Deux contraintes sur la forme de ce fichier, decouvertes en relisant la ressource
+  reellement embarquee :
+
+  - pas de declaration <?xml ... ?>. tauri-build prefixe la ressource RT_MANIFEST d'un
+    espace, et un espace avant la declaration rend le document invalide : Windows
+    refuserait de lancer le binaire. Son manifeste par defaut n'en porte pas non plus.
+    Sans declaration, XML suppose UTF-8, ce qui convient ;
+  - ASCII strict, pour ne pas dependre de l'encodage suppose.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="highestAvailable" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>
