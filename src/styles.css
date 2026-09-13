@@ -664,6 +664,24 @@ h2 {
   user-select: text;
 }
 
+/* Mise à jour */
+
+.update {
+  margin-top: 10px;
+}
+
+.update-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* La version est une étiquette sur cette ligne, pas un bloc : elle perd sa marge. */
+.update-line .mono {
+  margin-top: 0;
+}
+
 /* Qui a désactivé le mouvement au niveau du système change d'onglet sans glissement. */
 @media (prefers-reduced-motion: reduce) {
   .view {

@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cles de signature des mises a jour. Elles vivent hors du depot ; cette ligne est un
+# filet, pas un emplacement.
+*.key

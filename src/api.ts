@@ -115,6 +115,16 @@ export interface PhasesSnapshot {
 export interface UiState {
   pinned: boolean;
   autostart: boolean;
+  /** Celle du paquet installé, celle que la mise à jour compare. */
+  version: string;
+}
+
+/** Miroir de `update::UpdateInfo`. */
+export interface UpdateInfo {
+  version: string;
+  current: string;
+  /** Corps de la release GitHub, quand elle en porte un. */
+  notes: string | null;
 }
 
 export const readSensors = () => invoke<Reading>("read_sensors");
@@ -135,6 +145,12 @@ export const resetPhases = () => invoke<void>("reset_phases");
 export const readUiState = () => invoke<UiState>("ui_state");
 export const setPinned = (pinned: boolean) => invoke<void>("set_pinned", { pinned });
 export const setAutostart = (on: boolean) => invoke<boolean>("set_autostart", { on });
+
+/** `null` quand l'application est à jour. Remonte l'erreur : la recherche a été demandée. */
+export const checkUpdate = () => invoke<UpdateInfo | null>("check_update");
+
+/** Télécharge, installe, relance : l'appel ne rend la main que s'il échoue. */
+export const installUpdate = () => invoke<void>("install_update");
 
 // Le chassis passe par des commandes plutot que par l'API fenetre du frontend : tout
 // le pilotage du panneau reste au meme endroit, cote Rust. Le deplacement y gagne en

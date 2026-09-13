@@ -5,6 +5,7 @@ mod phases;
 mod power;
 mod tools;
 mod tray;
+mod update;
 
 /// Pipeline de mesure, expose : c'est la partie reutilisable de ce crate, independante
 /// de Tauri comme de l'UI.
@@ -33,6 +34,8 @@ pub(crate) const SILENT_FLAG: &str = "--silent";
 struct UiState {
     pinned: bool,
     autostart: bool,
+    /// Celle du paquet, pas celle du frontend : c'est elle que la mise a jour compare.
+    version: String,
 }
 
 #[tauri::command]
@@ -102,6 +105,7 @@ fn ui_state(app: AppHandle) -> UiState {
     UiState {
         pinned: app.state::<Flyout>().is_pinned(),
         autostart: autostart::is_enabled(),
+        version: app.package_info().version.to_string(),
     }
 }
 
@@ -147,6 +151,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             flyout::show(app);
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -156,6 +161,7 @@ pub fn run() {
             let recorder = Arc::new(PhaseRecorder::new(SAMPLE_PERIOD.as_secs_f64()));
             app.manage(Arc::clone(&recorder));
             app.manage(Flyout::new());
+            app.manage(update::Pending::default());
 
             // L'etat d'alimentation precede tout le reste : il decide de l'icone posee,
             // de la coche du menu et de la phase qui commence a accumuler.
@@ -176,6 +182,7 @@ pub fn run() {
             if !std::env::args().any(|a| a == SILENT_FLAG) {
                 flyout::show(&handle);
             }
+
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -203,7 +210,9 @@ pub fn run() {
             quit_app,
             ui_state,
             set_pinned,
-            set_autostart
+            set_autostart,
+            update::check_update,
+            update::install_update
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application Tauri");

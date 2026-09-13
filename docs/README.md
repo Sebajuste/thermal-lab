@@ -14,6 +14,7 @@ avec bascule en direct pour comparer à charge identique.
 | [third-party-tools.md](third-party-tools.md) | détecter, situer et lancer les outils tiers |
 | [power-control.md](power-control.md) | le mécanisme de bridage et ses pièges |
 | [distribution.md](distribution.md) | ce qui bloque hors de la machine de dev |
+| [releases.md](releases.md) | publier une version, et la faire arriver chez l'utilisateur |
 | [development.md](development.md) | commandes, tests, dépannage |
 
 ## Diagrammes
@@ -40,7 +41,7 @@ constaté plutôt que supposé.
 
 Fonctionnel : lecture des capteurs (6 fournisseurs), bascule du bridage, comparaison de
 phases, modèle de capacités, mode résident dans la zone de notification, détection et
-lancement des outils tiers. 37 tests, aucun avertissement de compilation.
+lancement des outils tiers. 49 tests, aucun avertissement de compilation.
 
 Non couvert, par ordre d'intérêt :
 

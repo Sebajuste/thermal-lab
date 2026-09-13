@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  checkUpdate,
   hideWindow,
   providerOf,
   quitApp,
@@ -19,6 +20,7 @@ import {
   type PhasesSnapshot,
   type PowerState,
   type Reading,
+  type UpdateInfo,
 } from "./api";
 import Icon from "./components/Icon";
 import MetricCard, { type Badge } from "./components/MetricCard";
@@ -29,6 +31,7 @@ import SlideDeck from "./components/SlideDeck";
 import Tabs, { TAB_IDS, type TabId } from "./components/Tabs";
 import TitleBar from "./components/TitleBar";
 import Toggle from "./components/Toggle";
+import UpdateRow from "./components/UpdateRow";
 
 const HISTORY = 120; // 2 minutes à 1 Hz
 const POLL_MS = 1000;
@@ -80,6 +83,8 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("live");
   const [pinned, setPinnedState] = useState(false);
   const [autostart, setAutostartState] = useState(false);
+  const [version, setVersion] = useState("");
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
   // La bascule passe par une tâche planifiée, donc par une invite UAC : le temps que
   // l'utilisateur y réponde, la case ne doit pas laisser croire qu'il ne s'est rien passé.
   const [autostartBusy, setAutostartBusy] = useState(false);
@@ -100,7 +105,17 @@ export default function App() {
       .then((s) => {
         setPinnedState(s.pinned);
         setAutostartState(s.autostart);
+        setVersion(s.version);
       })
+      .catch(() => {});
+  }, []);
+
+  // Une recherche au lancement, silencieuse : ne pas joindre GitHub n'est pas un
+  // événement dont l'utilisateur a quelque chose à faire. Celle du bouton, elle, a été
+  // demandée — elle rend son erreur.
+  useEffect(() => {
+    void checkUpdate()
+      .then(setUpdate)
       .catch(() => {});
   }, []);
 
@@ -300,6 +315,14 @@ export default function App() {
                   {autostartBusy && " …"}
                 </span>
               </label>
+
+              <UpdateRow
+                version={version}
+                update={update}
+                onFound={setUpdate}
+                onError={setError}
+              />
+
               <button
                 className="ghost danger"
                 onClick={() => void quitApp()}

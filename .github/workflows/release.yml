@@ -1,0 +1,82 @@
+# Publication d'une release et de son installateur.
+#
+# Le declencheur n'est pas le commit mais le numero de version de `tauri.conf.json` :
+# publier a chaque poussee sur `main` reviendrait a compiler le Rust pour une correction
+# de typo, et a notifier une mise a jour a tout le monde pour la meme. Bumper la version
+# *est* l'acte de publication ; le reste du temps ce workflow s'arrete au premier job.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Les tags sont le registre de ce qui a deja ete publie : sans eux, la
+          # comparaison ci-dessous croirait toujours avoir affaire a du neuf.
+          fetch-depth: 0
+
+      - id: v
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version deja publiee, rien a faire"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version a publier"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # Une release qui echoue ses tests n'a rien a faire chez les utilisateurs, et
+      # l'auto-mise a jour la leur poserait d'office.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signature du paquet de mise a jour, sans rapport avec la signature
+          # Authenticode du binaire : celle-ci authentifie la mise a jour aupres des
+          # installations existantes, l'autre authentifie l'editeur aupres de Windows.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Thermal Lab v__VERSION__
+          releaseDraft: false
+          prerelease: false
+          # Produit `latest.json` a cote de l'installateur : c'est le fichier que les
+          # installations existantes interrogent.
+          includeUpdaterJson: true

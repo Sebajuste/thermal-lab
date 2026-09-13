@@ -82,6 +82,13 @@ contourner serait précisément ce qu'on reproche aux « optimiseurs » du comme
 Le modèle de capacités est la réponse : chaque absence porte sa raison, aucune fonction
 n'est grisée sans explication.
 
+## Livrer les versions suivantes
+
+L'installateur est construit et publié par la CI, et l'application sait se mettre à jour
+seule depuis les releases GitHub : voir [releases.md](releases.md). Deux conséquences pour
+ce document — l'installateur est désormais `currentUser`, donc sans UAC à l'installation,
+et le défaut de signature ci-dessous ne se paie plus une fois mais à chaque mise à jour.
+
 ## Ce qu'il reste à faire pour distribuer
 
 **Signer l'exécutable.** Sans quoi SmartScreen dissuadera les destinataires d'installer.
