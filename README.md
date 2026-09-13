@@ -26,7 +26,8 @@ instead of taking someone's word for it.
 
 ## Install
 
-Grab the installer from [Releases](../../releases). It updates itself from then on.
+Grab the installer from [Releases](../../releases). It updates itself from then on —
+on a button, or unattended once *Update automatically* is ticked in the System tab.
 
 Windows 10 or 11, 64-bit. Changing a power plan needs administrator rights, so the app
 asks for elevation at launch. Decline it and everything still runs — read-only, with the

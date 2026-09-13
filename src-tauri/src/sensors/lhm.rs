@@ -9,6 +9,11 @@
 //! Les deux chemins sont gardes : le HTTP d'abord, puis le WMI pour OpenHardwareMonitor
 //! et les LHM anterieurs. Les fournisseurs qui lisent cette source
 //! (`libre_hw`, `amd_gpu`) ne voient qu'une liste de lignes, identique dans les deux cas.
+//!
+//! `data.json` ne porte les valeurs brutes (`RawValue`) que **depuis la 0.9.5** : avant,
+//! un capteur n'expose que sa valeur mise en forme et localisee (`"52,4 °C"`). Les deux
+//! sont lues, faute de quoi un LHM 0.9.4 repondait un arbre entier sans une seule mesure
+//! exploitable — et le HTTP, joignable, privait du WMI qui aurait marche.
 
 use std::time::Duration;
 
@@ -42,10 +47,22 @@ pub struct SensorRow {
 }
 
 /// Ce qui manque quand la source n'est pas joignable, dans les termes de l'utilisateur.
-pub const UNAVAILABLE_REASON: &str = "LibreHardwareMonitor ne publie aucune mesure";
-pub const UNAVAILABLE_HINT: &str = "Lancer LibreHardwareMonitor en administrateur, puis \
-     activer son serveur web (Options → Remote Web Server → Run) : depuis la version \
-     0.9.5, c'est la seule voie de lecture.";
+pub fn unavailable_reason() -> &'static str {
+    crate::t!(
+        "LibreHardwareMonitor publishes no reading",
+        "LibreHardwareMonitor ne publie aucune mesure"
+    )
+}
+
+pub fn unavailable_hint() -> &'static str {
+    crate::t!(
+        "Run LibreHardwareMonitor as administrator, then turn on its web server \
+         (Options → Remote Web Server → Run): since 0.9.5 that is the only way to read it.",
+        "Lancer LibreHardwareMonitor en administrateur, puis activer son serveur web \
+         (Options → Remote Web Server → Run) : depuis la version 0.9.5, c'est la seule voie \
+         de lecture."
+    )
+}
 
 /// Une voie de lecture etablie. Detenue par le fournisseur, elle survit aux cycles.
 pub enum Source {
@@ -54,15 +71,17 @@ pub enum Source {
 }
 
 impl Source {
-    /// Etablit la premiere voie qui repond, ou rien. Le HTTP passe en premier : c'est
-    /// le seul chemin qu'un LHM a jour propose encore.
+    /// Etablit la premiere voie qui publie des capteurs, ou rien. Le HTTP passe en
+    /// premier : c'est le seul chemin qu'un LHM a jour propose encore.
     pub fn open(wmi: Option<&WmiContext>) -> Option<Self> {
         http_source().or_else(|| wmi_source(wmi?))
     }
 
-    /// Les capteurs a cet instant. `None` quand la source a disparu en cours de route.
+    /// Les capteurs a cet instant. `None` quand la source a disparu en cours de route,
+    /// **ou** qu'elle ne publie plus rien : une voie muette laisserait `actif` a
+    /// l'ecran devant un releve vide, alors que l'autre voie reste a tenter.
     pub fn rows(&self) -> Option<Vec<SensorRow>> {
-        match self {
+        let rows = match self {
             Source::Http { url, agent } => fetch_json(agent, url),
             Source::Wmi(con) => con.raw_query::<Row>(QUERY).ok().map(|rows| {
                 rows.iter()
@@ -79,7 +98,9 @@ impl Source {
                     })
                     .collect()
             }),
-        }
+        }?;
+
+        (!rows.is_empty()).then_some(rows)
     }
 }
 
@@ -99,15 +120,16 @@ fn http_source() -> Option<Source> {
     // et l'attente qui suit coute un cycle d'echantillonnage entier. Le serveur de LHM
     // ecoute sur toutes les interfaces.
     let url = format!("http://127.0.0.1:{}/data.json", port());
-    fetch_json(&agent, &url).map(|_| Source::Http { url, agent })
+    let source = Source::Http { url, agent };
+    source.rows().map(|_| source)
 }
 
 fn wmi_source(wmi: &WmiContext) -> Option<Source> {
     NAMESPACES
         .into_iter()
         .filter_map(|ns| wmi.connect(ns).ok())
-        .find(|con| con.raw_query::<Row>(QUERY).is_ok())
         .map(Source::Wmi)
+        .find(|source| source.rows().is_some())
 }
 
 /// L'arborescence renvoyee par `data.json`. Seuls les noeuds de capteur portent un
@@ -120,10 +142,14 @@ struct Node {
     sensor_id: Option<String>,
     #[serde(rename = "Type", default)]
     kind: Option<String>,
-    /// Valeur brute, sans unite ni mise en forme — `Value` est une chaine localisee,
-    /// donc inexploitable. LHM ecrit `"NaN"` en chaine pour un capteur sans lecture.
+    /// Valeur brute, sans unite ni mise en forme. LHM ecrit `"NaN"` en chaine pour un
+    /// capteur sans lecture. Absente avant la 0.9.5.
     #[serde(rename = "RawValue", default)]
     raw_value: Option<serde_json::Value>,
+    /// Valeur mise en forme et localisee (`"52,4 °C"`, `"-"` sans lecture), seul repli
+    /// pour les LHM anterieurs a la 0.9.5. La decimale perdue ne coute rien ici.
+    #[serde(rename = "Value", default)]
+    value: Option<String>,
     #[serde(rename = "Children", default)]
     children: Vec<Node>,
 }
@@ -140,6 +166,7 @@ fn collect(node: &Node, out: &mut Vec<SensorRow>) {
         .raw_value
         .as_ref()
         .and_then(number)
+        .or_else(|| node.value.as_deref().and_then(formatted_number))
         .filter(|v| v.is_finite());
     if let (Some(id), Some(value)) = (&node.sensor_id, value) {
         out.push(SensorRow {
@@ -162,6 +189,32 @@ fn number(v: &serde_json::Value) -> Option<f64> {
         serde_json::Value::String(s) => s.trim().parse().ok(),
         _ => None,
     }
+}
+
+/// Le nombre en tete d'une valeur mise en forme : `"52,4 °C"` → `52.4`, `"-"` → rien.
+/// La locale est celle de la machine qui fait tourner LHM, inconnue d'ici : separateur
+/// decimal virgule ou point, milliers separes par une espace insecable.
+fn formatted_number(text: &str) -> Option<f64> {
+    let head: String = text
+        .trim()
+        .chars()
+        .take_while(|c| {
+            c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | ',') || c.is_whitespace()
+        })
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    // Un separateur n'est decimal que s'il ne reste qu'un ou deux chiffres derriere :
+    // c'est ce qui distingue `"3.792 MHz"` (milliers) de `"52.4 °C"` (decimale).
+    let point = head
+        .rfind([',', '.'])
+        .filter(|i| matches!(head.len() - i - 1, 1 | 2));
+    let plain = match point {
+        Some(i) => format!("{}.{}", head[..i].replace([',', '.'], ""), &head[i + 1..]),
+        None => head.replace([',', '.'], ""),
+    };
+
+    plain.parse().ok()
 }
 
 #[cfg(test)]
@@ -205,6 +258,41 @@ mod tests {
     #[test]
     fn drops_unreadable_sensors() {
         assert_eq!(parse(SAMPLE).len(), 1, "le capteur NaN doit etre ecarte");
+    }
+
+    /// Avant la 0.9.5, `data.json` ne porte pas de `RawValue` : sans ce repli, l'arbre
+    /// entier d'un LHM 0.9.4 se lisait sans qu'une seule mesure en sorte.
+    #[test]
+    fn reads_the_formatted_value_when_the_raw_one_is_absent() {
+        let rows = parse(
+            r#"{"Text":"root","Children":[
+                 {"Text":"Core (Tctl/Tdie)","SensorId":"/amdcpu/0/temperature/0",
+                  "Type":"Temperature","Value":"52,4 °C"},
+                 {"Text":"CPU Package","SensorId":"/amdcpu/0/power/0",
+                  "Type":"Power","Value":"88.1 W"},
+                 {"Text":"Core #1","SensorId":"/amdcpu/0/clock/1",
+                  "Type":"Clock","Value":"3 792,0 MHz"},
+                 {"Text":"Core #2","SensorId":"/amdcpu/0/temperature/9",
+                  "Type":"Temperature","Value":"-"}]}"#,
+        );
+
+        let values: Vec<f64> = rows.iter().map(|r| r.value).collect();
+        assert_eq!(
+            values,
+            vec![52.4, 88.1, 3792.0],
+            "capteur sans lecture ou mal lu"
+        );
+    }
+
+    /// Une valeur de milliers ne doit pas se lire comme une decimale : `3.792 MHz` est
+    /// la meme frequence que `3 792 MHz`, pas 3,792.
+    #[test]
+    fn tells_a_thousands_separator_from_a_decimal_one() {
+        assert_eq!(formatted_number("3.792 MHz"), Some(3792.0));
+        assert_eq!(formatted_number("1.234,5 MHz"), Some(1234.5));
+        assert_eq!(formatted_number("-5,0 °C"), Some(-5.0));
+        assert_eq!(formatted_number("-"), None);
+        assert_eq!(formatted_number(""), None);
     }
 
     /// Les noeuds de materiel n'ont pas de `SensorId` : ils ne valent que par leurs

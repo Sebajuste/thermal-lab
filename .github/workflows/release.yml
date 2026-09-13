@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  check:
+  version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -41,8 +41,8 @@ jobs:
           fi
 
   build:
-    needs: check
-    if: needs.check.outputs.publish == 'true'
+    needs: version
+    if: needs.version.outputs.publish == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5

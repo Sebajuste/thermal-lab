@@ -41,7 +41,7 @@ impl Provider for LibreHwProvider {
 
         match self.source {
             Some(_) => ProbeState::Ready,
-            None => ProbeState::unavailable(lhm::UNAVAILABLE_REASON, lhm::UNAVAILABLE_HINT),
+            None => ProbeState::unavailable(lhm::unavailable_reason(), lhm::unavailable_hint()),
         }
     }
 

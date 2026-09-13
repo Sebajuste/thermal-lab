@@ -88,14 +88,24 @@ impl Provider for HwInfoProvider {
 
         let Some(view) = MappedView::open(SECTION) else {
             return ProbeState::unavailable(
-                "HWiNFO ne tourne pas, ou sa memoire partagee est desactivee",
-                "Dans HWiNFO : Settings > Main Settings > cocher « Shared Memory Support ».",
+                crate::t!(
+                    "HWiNFO is not running, or its shared memory is disabled",
+                    "HWiNFO ne tourne pas, ou sa memoire partagee est desactivee"
+                ),
+                crate::t!(
+                    "In HWiNFO: Settings > Main Settings > tick « Shared Memory Support ».",
+                    "Dans HWiNFO : Settings > Main Settings > cocher « Shared Memory Support »."
+                ),
             );
         };
 
         match Self::header(&view) {
             None => ProbeState::Failed {
-                error: "signature ou en-tete inattendu dans la section partagee".into(),
+                error: crate::t!(
+                    "unexpected signature or header in the shared section",
+                    "signature ou en-tete inattendu dans la section partagee"
+                )
+                .into(),
             },
             Some(_) => {
                 self.available = true;

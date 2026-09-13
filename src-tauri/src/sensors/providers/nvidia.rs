@@ -68,11 +68,18 @@ impl Provider for NvidiaProvider {
                 ProbeState::Ready
             }
             Some(_) => ProbeState::Failed {
-                error: "nvidia-smi a repondu un format inattendu".into(),
+                error: crate::t!(
+                    "nvidia-smi answered in an unexpected format",
+                    "nvidia-smi a repondu un format inattendu"
+                )
+                .into(),
             },
             None => {
                 self.available = false;
-                ProbeState::unavailable_only("aucun GPU NVIDIA, ou pilote absent")
+                ProbeState::unavailable_only(crate::t!(
+                    "no NVIDIA GPU, or driver missing",
+                    "aucun GPU NVIDIA, ou pilote absent"
+                ))
             }
         }
     }

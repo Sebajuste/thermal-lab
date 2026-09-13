@@ -56,11 +56,17 @@ pub fn build(app: &AppHandle, optimized: bool, can_toggle: bool) -> tauri::Resul
     let free = Image::new_owned(base.rgba().to_vec(), base.width(), base.height());
     let optimized_icon = tinted(&base, OPTIMIZED_RGB);
 
-    let open = MenuItem::with_id(app, "open", "Ouvrir Thermal Lab", true, None::<&str>)?;
+    let open = MenuItem::with_id(
+        app,
+        "open",
+        crate::t!("Open Thermal Lab", "Ouvrir Thermal Lab"),
+        true,
+        None::<&str>,
+    )?;
     let toggle_item = CheckMenuItem::with_id(
         app,
         "toggle",
-        "Optimisation (turbo bridé)",
+        crate::t!("Optimization (turbo capped)", "Optimisation (turbo bridé)"),
         can_toggle,
         optimized,
         None::<&str>,
@@ -68,12 +74,18 @@ pub fn build(app: &AppHandle, optimized: bool, can_toggle: bool) -> tauri::Resul
     let autostart_item = CheckMenuItem::with_id(
         app,
         "autostart",
-        "Démarrer avec Windows",
+        crate::t!("Start with Windows", "Démarrer avec Windows"),
         true,
         crate::autostart::is_enabled(),
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(app, "quit", "Quitter Thermal Lab", true, None::<&str>)?;
+    let quit = MenuItem::with_id(
+        app,
+        "quit",
+        crate::t!("Quit Thermal Lab", "Quitter Thermal Lab"),
+        true,
+        None::<&str>,
+    )?;
 
     let menu = Menu::with_items(
         app,
@@ -163,7 +175,12 @@ fn on_icon(tray: &tauri::tray::TrayIcon, event: TrayIconEvent) {
 }
 
 pub fn set_autostart(_app: &AppHandle, on: bool) -> Result<(), String> {
-    crate::autostart::set(on).map_err(|e| format!("démarrage automatique : {e}"))
+    crate::autostart::set(on).map_err(|e| {
+        crate::t!(
+            format!("autostart: {e}"),
+            format!("démarrage automatique : {e}")
+        )
+    })
 }
 
 /// Repercute l'etat du bridage sur l'icone et sur la coche du menu.
@@ -196,12 +213,18 @@ pub fn refresh_tooltip(app: &AppHandle, reading: &Reading, optimized: bool) {
         reading.get(Metric::GpuTempC),
         reading.get(Metric::GpuPowerW),
     );
-    let text = format!(
-        "Thermal Lab — optimisation {}\n{}{}",
-        if optimized { "active" } else { "inactive" },
-        cpu,
-        gpu
-    );
+    let head = if optimized {
+        crate::t!(
+            "Thermal Lab — optimization on",
+            "Thermal Lab — optimisation active"
+        )
+    } else {
+        crate::t!(
+            "Thermal Lab — optimization off",
+            "Thermal Lab — optimisation inactive"
+        )
+    };
+    let text = format!("{head}\n{cpu}{gpu}");
 
     let state = app.state::<Tray>();
     // Les appels Win32 d'infobulle ne valent pas une ecriture par seconde pour un texte

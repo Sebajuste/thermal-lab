@@ -36,7 +36,7 @@ impl Provider for AcpiProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             id: ID,
-            name: "Zone thermique ACPI",
+            name: crate::t!("ACPI thermal zone", "Zone thermique ACPI"),
             kind: ProviderKind::Builtin,
             provides: PROVIDES,
             url: None,
@@ -46,12 +46,15 @@ impl Provider for AcpiProvider {
     fn probe(&mut self, ctx: &ProbeContext<'_>) -> ProbeState {
         let Some(wmi) = ctx.wmi else {
             return ProbeState::Failed {
-                error: "COM indisponible".into(),
+                error: crate::t!("COM unavailable", "COM indisponible").into(),
             };
         };
         let Ok(con) = wmi.connect(NAMESPACE) else {
             return ProbeState::Failed {
-                error: format!("espace de noms {NAMESPACE} inaccessible"),
+                error: crate::t!(
+                    format!("namespace {NAMESPACE} unreachable"),
+                    format!("espace de noms {NAMESPACE} inaccessible")
+                ),
             };
         };
         match con.raw_query::<Row>(QUERY) {
@@ -59,7 +62,10 @@ impl Provider for AcpiProvider {
                 self.con = Some(con);
                 ProbeState::Ready
             }
-            _ => ProbeState::unavailable_only("aucune zone thermique exposee par cette carte mere"),
+            _ => ProbeState::unavailable_only(crate::t!(
+                "this motherboard exposes no thermal zone",
+                "aucune zone thermique exposee par cette carte mere"
+            )),
         }
     }
 

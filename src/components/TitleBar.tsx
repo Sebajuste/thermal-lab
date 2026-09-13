@@ -1,5 +1,6 @@
 import type { PointerEvent } from "react";
 import { startDrag } from "../api";
+import { t } from "../i18n";
 import Icon from "./Icon";
 
 interface Props {
@@ -27,34 +28,26 @@ export default function TitleBar({ optimized, pinned, onTogglePin, onClose }: Pr
   };
 
   return (
-    <div
-      className="titlebar"
-      onPointerDown={grab}
-      title="Glisser pour déplacer"
-    >
+    <div className="titlebar" onPointerDown={grab} title={t.drag}>
       <span
         className={`state-dot ${optimized ? "on" : "off"}`}
-        title={optimized ? "Turbo bridé" : "Turbo libre"}
+        title={optimized ? t.turboCapped : t.turboFree}
       />
       <span className="titlebar-name">Thermal Lab</span>
       <button
         className={`chrome ${pinned ? "active" : ""}`}
         onClick={onTogglePin}
         aria-pressed={pinned}
-        aria-label="Épingler le panneau"
-        title={
-          pinned
-            ? "Détacher"
-            : "Épingler"
-        }
+        aria-label={t.pinPanel}
+        title={pinned ? t.unpin : t.pin}
       >
         <Icon name="pin" size={15} />
       </button>
       <button
         className="chrome close"
         onClick={onClose}
-        aria-label="Masquer le panneau"
-        title="Masquer le panneau"
+        aria-label={t.hidePanel}
+        title={t.hidePanel}
       >
         <Icon name="close" size={15} />
       </button>

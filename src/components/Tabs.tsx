@@ -1,11 +1,12 @@
+import { t } from "../i18n";
 import Icon, { type IconName } from "./Icon";
 
 export type TabId = "live" | "compare" | "system";
 
-const TABS: { id: TabId; icon: IconName; label: string }[] = [
-  { id: "live", icon: "live", label: "Mesures en direct" },
-  { id: "compare", icon: "compare", label: "Comparaison des phases" },
-  { id: "system", icon: "system", label: "Capacités et réglages" },
+const TABS: { id: TabId; icon: IconName; label: () => string }[] = [
+  { id: "live", icon: "live", label: () => t.tabLive },
+  { id: "compare", icon: "compare", label: () => t.tabCompare },
+  { id: "system", icon: "system", label: () => t.tabSystem },
 ];
 
 /** L'ordre de la barre : c'est lui qui donne le sens du glissement d'une vue à l'autre. */
@@ -26,18 +27,21 @@ export default function Tabs({
 }) {
   return (
     <nav className="tabbar">
-      {TABS.map(({ id, icon, label }) => (
-        <button
-          key={id}
-          className={`tab ${active === id ? "active" : ""}`}
-          onClick={() => onSelect(id)}
-          title={label}
-          aria-label={label}
-          aria-current={active === id}
-        >
-          <Icon name={icon} size={20} />
-        </button>
-      ))}
+      {TABS.map(({ id, icon, label }) => {
+        const text = label();
+        return (
+          <button
+            key={id}
+            className={`tab ${active === id ? "active" : ""}`}
+            onClick={() => onSelect(id)}
+            title={text}
+            aria-label={text}
+            aria-current={active === id}
+          >
+            <Icon name={icon} size={20} />
+          </button>
+        );
+      })}
     </nav>
   );
 }
