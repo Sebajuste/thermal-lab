@@ -108,7 +108,11 @@ impl Provider for CoreTempProvider {
                 continue;
             }
             // Core Temp publie soit la temperature absolue, soit l'ecart au TjMax.
-            let mut celsius = if d.delta_to_tjmax != 0 { tj_max - raw } else { raw };
+            let mut celsius = if d.delta_to_tjmax != 0 {
+                tj_max - raw
+            } else {
+                raw
+            };
             if d.fahrenheit != 0 {
                 celsius = (celsius - 32.0) * 5.0 / 9.0;
             }

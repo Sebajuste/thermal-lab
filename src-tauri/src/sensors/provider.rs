@@ -27,7 +27,10 @@ pub enum ProbeState {
     Ready,
     /// Absent pour une raison attendue — ce n'est pas une erreur, et `hint` dit quoi
     /// faire pour y remedier.
-    Unavailable { reason: String, hint: Option<String> },
+    Unavailable {
+        reason: String,
+        hint: Option<String>,
+    },
     /// Present mais cassé : la source a repondu autre chose que ce qui etait attendu.
     Failed { error: String },
 }

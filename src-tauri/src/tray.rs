@@ -6,12 +6,12 @@
 
 use std::sync::Mutex;
 
+use crate::flyout::{self, Anchor};
+use crate::sensors::{Metric, Reading};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
-use crate::flyout::{self, Anchor};
-use crate::sensors::{Metric, Reading};
 
 pub const TRAY_ID: &str = "thermal-lab";
 
@@ -36,7 +36,10 @@ pub struct Tray {
 /// de zone de notification.
 fn tinted(src: &Image<'_>, rgb: (f32, f32, f32)) -> Image<'static> {
     let mut rgba = src.rgba().to_vec();
-    for px in rgba.chunks_exact_mut(4) {
+    // `as_chunks_mut` plutot que `chunks_exact_mut` : la taille etant constante, le
+    // compilateur rend un tableau de 4 et non une tranche, donc sans borne a verifier.
+    let (pixels, _) = rgba.as_chunks_mut::<4>();
+    for px in pixels {
         let lum = 0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32;
         // Racine quatrieme plutot que lineaire : l'icone d'origine est sombre, une
         // teinte proportionnelle a sa luminance la rendrait presque noire.
@@ -183,8 +186,16 @@ pub fn set_can_toggle(app: &AppHandle, can: bool) {
 
 /// Infobulle : l'essentiel sans rien ouvrir. Windows la limite a 127 caracteres.
 pub fn refresh_tooltip(app: &AppHandle, reading: &Reading, optimized: bool) {
-    let cpu = line("CPU", reading.get(Metric::CpuTempC), reading.get(Metric::CpuPowerW));
-    let gpu = line("GPU", reading.get(Metric::GpuTempC), reading.get(Metric::GpuPowerW));
+    let cpu = line(
+        "CPU",
+        reading.get(Metric::CpuTempC),
+        reading.get(Metric::CpuPowerW),
+    );
+    let gpu = line(
+        "GPU",
+        reading.get(Metric::GpuTempC),
+        reading.get(Metric::GpuPowerW),
+    );
     let text = format!(
         "Thermal Lab — optimisation {}\n{}{}",
         if optimized { "active" } else { "inactive" },
@@ -210,7 +221,11 @@ fn line(label: &str, temp: Option<f64>, power: Option<f64>) -> String {
         (t, p) => {
             let t = t.map(|v| format!("{v:.0} °C")).unwrap_or_default();
             let p = p.map(|v| format!("{v:.0} W")).unwrap_or_default();
-            let sep = if t.is_empty() || p.is_empty() { "" } else { " · " };
+            let sep = if t.is_empty() || p.is_empty() {
+                ""
+            } else {
+                " · "
+            };
             format!("{label} {t}{sep}{p}\n")
         }
     }

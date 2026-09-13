@@ -1,0 +1,13 @@
+# Version unique pour le poste de developpement, la CI et la release.
+#
+# Sans elle, `stable` designe une version differente selon le jour et la machine : une
+# regle clippy apparue entre-temps fait rougir la CI sur du code que personne n'a
+# touche, et le binaire publie n'est pas reproductible. C'est arrive des le premier run,
+# entre un poste en 1.96.0 et un runner en 1.98.1.
+#
+# Contrepartie assumee : les nouvelles regles n'arrivent qu'au bump, qui est un geste
+# explicite. rustup installe la version indiquee tout seul, a la premiere commande cargo.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -261,14 +261,20 @@ mod tests {
 
     #[test]
     fn recognises_the_executable_it_points_at() {
-        assert!(task_targets(SAMPLE, r"D:\Outils\Thermal Lab\thermal-lab.exe"));
+        assert!(task_targets(
+            SAMPLE,
+            r"D:\Outils\Thermal Lab\thermal-lab.exe"
+        ));
     }
 
     /// Windows ne distingue pas la casse des chemins, et `schtasks` restitue celle de la
     /// creation : comparer strictement ferait croire a un deplacement inexistant.
     #[test]
     fn ignores_case() {
-        assert!(task_targets(SAMPLE, r"d:\outils\thermal lab\THERMAL-LAB.EXE"));
+        assert!(task_targets(
+            SAMPLE,
+            r"d:\outils\thermal lab\THERMAL-LAB.EXE"
+        ));
     }
 
     /// Le coeur du correctif : une tache laissee sur l'ancien emplacement ne compte pas

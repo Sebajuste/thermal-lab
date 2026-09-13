@@ -46,14 +46,22 @@ mod tests {
     fn identifiers_are_unique() {
         let ids: Vec<_> = build().iter().map(|p| p.info().id).collect();
         let unique: HashSet<_> = ids.iter().collect();
-        assert_eq!(ids.len(), unique.len(), "identifiants de fournisseurs dupliques");
+        assert_eq!(
+            ids.len(),
+            unique.len(),
+            "identifiants de fournisseurs dupliques"
+        );
     }
 
     #[test]
     fn every_provider_declares_what_it_measures() {
         for p in build() {
             let info = p.info();
-            assert!(!info.provides.is_empty(), "{} ne declare aucune metrique", info.id);
+            assert!(
+                !info.provides.is_empty(),
+                "{} ne declare aucune metrique",
+                info.id
+            );
             assert!(!info.name.is_empty());
         }
     }
@@ -77,6 +85,9 @@ mod tests {
         let kinds: Vec<_> = build().iter().map(|p| p.info().kind).collect();
         let last_external = kinds.iter().rposition(|k| *k == ProviderKind::External);
         let first_builtin = kinds.iter().position(|k| *k == ProviderKind::Builtin);
-        assert!(last_external < first_builtin, "ordre de priorite incoherent");
+        assert!(
+            last_external < first_builtin,
+            "ordre de priorite incoherent"
+        );
     }
 }

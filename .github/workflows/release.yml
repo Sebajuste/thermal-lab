@@ -21,7 +21,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       publish: ${{ steps.v.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Les tags sont le registre de ce qui a deja ete publie : sans eux, la
           # comparaison ci-dessous croirait toujours avoir affaire a du neuf.
@@ -45,14 +45,16 @@ jobs:
     if: needs.check.outputs.publish == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pas d'action de toolchain : `rust-toolchain.toml` fait foi, et `rustup install`
+      # sans argument installe la version qu'il designe.
+      - run: rustup install
 
       - uses: Swatinem/rust-cache@v2
         with:

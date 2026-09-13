@@ -1,0 +1,42 @@
+# Garde-fou sur la branche de travail.
+#
+# Sans lui, rien ne verifie `develop` : les tests ne tourneraient qu'au moment de
+# publier, et une regression se decouvrirait pendant une release plutot qu'avant.
+name: ci
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # Pas d'action de toolchain : `rust-toolchain.toml` fait foi, et `rustup install`
+      # sans argument installe la version qu'il designe.
+      - run: rustup install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      # `--all-targets` couvre aussi les tests : du code mort y passe inapercu sinon.
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # `tsc` puis vite : la compilation du frontend echoue sur une erreur de type.
+      - run: npm run build

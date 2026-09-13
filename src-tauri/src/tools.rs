@@ -279,7 +279,7 @@ fn is_running(t: &Tool, images: &[String]) -> bool {
         .chain(t.aliases.iter().copied())
         .any(|exe| {
             let exe = exe.to_lowercase();
-            images.iter().any(|i| *i == exe)
+            images.contains(&exe)
         })
 }
 
