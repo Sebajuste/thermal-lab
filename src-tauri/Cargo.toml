@@ -3,6 +3,7 @@ name = "thermal-lab"
 version = "0.1.0"
 description = "CPU thermal optimizer"
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "thermal_lab_lib"

@@ -183,12 +183,12 @@ mod tests {
 
     #[test]
     fn parses_guid_from_localized_output() {
-        let fr = "GUID du mode de gestion de l'alimentation : 4e2a2b94-6646-493e-9f10-64f712e088aa  (Camomile)";
+        let fr = "GUID du mode de gestion de l'alimentation : 4e2a2b94-6646-493e-9f10-64f712e088aa  (Usage normal)";
         assert_eq!(
             extract_guid(fr).as_deref(),
             Some("4e2a2b94-6646-493e-9f10-64f712e088aa")
         );
-        assert_eq!(extract_name(fr), "Camomile");
+        assert_eq!(extract_name(fr), "Usage normal");
     }
 
     #[test]
