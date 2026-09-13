@@ -26,7 +26,8 @@ administrateur, son pilote en dépend. Inutile de redémarrer l'application : `p
 
 ## Tests
 
-49 tests, répartis selon ce qu'ils protègent :
+Répartis selon ce qu'ils protègent — le nombre exact n'est pas recopié ici, il se
+démode à chaque commit :
 
 | Zone | Ce qui est couvert |
 |---|---|
@@ -51,6 +52,22 @@ Le test Core Temp se comporte différemment selon que l'outil tourne : il annonc
 rien à valider s'il est absent, échoue si la structure est illisible, et vérifie des
 plages physiques sinon. Un `Failed` au probe y est traité comme un bug, pas comme une
 absence.
+
+## Ce que vérifie la CI
+
+Sur les **pull requests seulement**, pas à chaque poussée : `develop` reçoit des commits
+intermédiaires qu'on ne cherche pas à valider un par un. Quatre portes, dans cet ordre :
+
+```
+npm run check:versions   # les trois fichiers qui portent le numéro concordent
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+npm run build            # tsc puis vite
+```
+
+Les cinq se lancent en local, et c'est la façon la plus rapide de savoir si une pull
+request passera. La protection de `main` exige ce statut, donc rien n'y entre sans.
 
 ## Constantes de réglage
 

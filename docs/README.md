@@ -41,7 +41,8 @@ constaté plutôt que supposé.
 
 Fonctionnel : lecture des capteurs (6 fournisseurs), bascule du bridage, comparaison de
 phases, modèle de capacités, mode résident dans la zone de notification, détection et
-lancement des outils tiers. 49 tests, aucun avertissement de compilation.
+lancement des outils tiers. La CI tient le reste : format, clippy sans avertissement,
+tests, et build du frontend à chaque pull request.
 
 Non couvert, par ordre d'intérêt :
 
