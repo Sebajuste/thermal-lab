@@ -1,7 +1,7 @@
 [package]
 name = "thermal-lab"
 version = "0.1.0"
-description = "POC de mesure et de bridage thermique CPU/GPU"
+description = "CPU thermal optimizer"
 edition = "2021"
 
 [lib]
