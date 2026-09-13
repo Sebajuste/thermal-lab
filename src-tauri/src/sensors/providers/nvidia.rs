@@ -15,15 +15,18 @@ use crate::sensors::provider::{
 const ID: &str = "nvidia-smi";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-const QUERY: &str = "--query-gpu=temperature.gpu,power.draw,clocks.sm,utilization.gpu";
+const QUERY: &str = "--query-gpu=temperature.gpu,power.draw,clocks.sm,clocks.max.sm,utilization.gpu,utilization.decoder,utilization.encoder";
 const FORMAT: &str = "--format=csv,noheader,nounits";
 
 /// L'ordre des colonnes suit celui de `QUERY`.
-const COLUMNS: [Metric; 4] = [
+const COLUMNS: [Metric; 7] = [
     Metric::GpuTempC,
     Metric::GpuPowerW,
     Metric::GpuClockMhz,
+    Metric::GpuClockMaxMhz,
     Metric::GpuUtilPct,
+    Metric::GpuDecodeUtilPct,
+    Metric::GpuEncodeUtilPct,
 ];
 
 const PROVIDES: &[Metric] = &COLUMNS;
@@ -103,5 +106,24 @@ impl Provider for NvidiaProvider {
         }
 
         Sampled::Answered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `sample` lit les deux listes de front. Si elles divergent, `zip` n'echoue pas :
+    /// il tronque, et chaque colonne restante part dans la mauvaise grandeur — une
+    /// puissance rangee en frequence, sans le moindre message. Le desalignement est
+    /// silencieux, donc il se teste plutot qu'il ne se relit.
+    #[test]
+    fn every_queried_column_has_its_metric() {
+        let columns = QUERY
+            .strip_prefix("--query-gpu=")
+            .expect("QUERY porte son prefixe")
+            .split(',')
+            .count();
+        assert_eq!(columns, COLUMNS.len());
     }
 }

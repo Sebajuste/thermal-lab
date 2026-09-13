@@ -60,6 +60,28 @@ const TURBO_THRESHOLD_PCT = 105;
 /** Ce que la mesure permet réellement de conclure sur le turbo. */
 type TurboView = "boost" | "capped" | "idle";
 
+/**
+ * Un GPU au repos redescend franchement : 210 MHz sur les 3105 possibles, mesuré sur
+ * RTX 4080 SUPER. Rester près du plafond sans rien calculer n'est pas un repos coûteux,
+ * c'est un état contraint — et sur un portable ces watts traversent les caloducs du CPU
+ * avant de sortir, ce qui explique une température CPU que la consommation CPU ne
+ * justifie pas.
+ *
+ * Le seuil est relatif au plafond de la carte, faute de quoi il ne voudrait rien dire :
+ * 2115 MHz est un plein régime sur un GPU mobile et un régime intermédiaire ailleurs.
+ */
+const GPU_PINNED_CLOCK_PCT = 50;
+
+/**
+ * Charge en dessous de laquelle le GPU est considéré inoccupé. Deux seuils comme pour le
+ * CPU : un seul ferait osciller le badge sur le jitter du repos.
+ */
+const GPU_IDLE_ENTER_PCT = 10;
+const GPU_IDLE_LEAVE_PCT = 20;
+
+/** Ce que la mesure permet de conclure sur l'état de repos du GPU. */
+type GpuView = "busy" | "pinned" | "idle";
+
 const fmt = (v: number | null, digits = 0, unit = "") =>
   v === null || !Number.isFinite(v) ? "—" : `${v.toFixed(digits)}${unit}`;
 
@@ -99,6 +121,14 @@ export default function App() {
   const [turboStable, setTurboStable] = useState<boolean | null>(null);
   const [atRest, setAtRest] = useState(true);
   const pendingTurbo = useRef<{ value: boolean | null; count: number }>({
+    value: null,
+    count: 0,
+  });
+
+  // Même précaution côté GPU : la fréquence peut monter le temps d'une image composée.
+  const [gpuPinned, setGpuPinned] = useState<boolean | null>(null);
+  const [gpuAtRest, setGpuAtRest] = useState(true);
+  const pendingGpuPinned = useRef<{ value: boolean | null; count: number }>({
     value: null,
     count: 0,
   });
@@ -198,6 +228,33 @@ export default function App() {
               : { value: boosting, count: 1 };
           if (pendingTurbo.current.count >= 2) setTurboStable(boosting);
         }
+
+        // Le décodage vidéo laisse `gpuUtilPct` bas tout en occupant la carte : une
+        // lecture en plein écran passerait pour un repos, et un GPU qui décode n'a rien
+        // d'épinglé. Les moteurs dédiés comptent donc dans la charge.
+        const gpuUtil = val(r, "gpuUtilPct");
+        if (gpuUtil !== null) {
+          const load = Math.max(
+            gpuUtil,
+            val(r, "gpuDecodeUtilPct") ?? 0,
+            val(r, "gpuEncodeUtilPct") ?? 0,
+          );
+          setGpuAtRest((rest) =>
+            rest ? load <= GPU_IDLE_LEAVE_PCT : load < GPU_IDLE_ENTER_PCT,
+          );
+        }
+
+        const gpuClock = val(r, "gpuClockMhz");
+        const gpuClockMax = val(r, "gpuClockMaxMhz");
+        if (gpuClock !== null && gpuClockMax !== null && gpuClockMax > 0) {
+          const high = (gpuClock / gpuClockMax) * 100 > GPU_PINNED_CLOCK_PCT;
+          const g = pendingGpuPinned.current;
+          pendingGpuPinned.current =
+            high === g.value
+              ? { value: g.value, count: g.count + 1 }
+              : { value: high, count: 1 };
+          if (pendingGpuPinned.current.count >= 2) setGpuPinned(high);
+        }
       } catch (e) {
         if (alive) setError(String(e));
       }
@@ -291,9 +348,47 @@ export default function App() {
           ? { text: t.badgeIdle, kind: "idle" }
           : null;
 
+  /**
+   * Trois états, et le troisième est le seul qui alerte : au repos avec la fréquence au
+   * plafond, la carte consomme sans rien produire. Sous charge la mesure ne conclut
+   * rien — une fréquence haute y est normale.
+   */
+  const gpuView: GpuView | null =
+    !reading || val(reading, "gpuUtilPct") === null
+      ? null
+      : !gpuAtRest
+        ? "busy"
+        : gpuPinned === null
+          ? null
+          : gpuPinned
+            ? "pinned"
+            : "idle";
+
+  // Les couleurs gardent le sens qu'elles ont pour le CPU : « hot » l'état coûteux,
+  // « cool » l'état économe, « idle » celui où la mesure ne permet pas de conclure.
+  const gpuBadge: Badge | null =
+    gpuView === "pinned"
+      ? { text: t.badgeGpuPinned, kind: "hot" }
+      : gpuView === "idle"
+        ? { text: t.badgeIdle, kind: "cool" }
+        : gpuView === "busy"
+          ? { text: t.badgeGpuBusy, kind: "idle" }
+          : null;
+
   const spark = (m: MetricKey) => history.map((h) => val(h, m));
   const nominal = val(reading, "cpuNominalMhz");
   const maxCore = val(reading, "cpuMaxCorePct");
+
+  // La fréquence seule ne se juge pas : c'est son rapport au plafond de la carte qui
+  // dit s'il s'agit d'un repos ou d'un plein régime.
+  const gpuClock = val(reading, "gpuClockMhz");
+  const gpuClockMax = val(reading, "gpuClockMaxMhz");
+  const gpuClockNote =
+    gpuClock === null
+      ? ""
+      : gpuClockMax === null
+        ? fmt(gpuClock, 0, " MHz")
+        : `${fmt(gpuClock, 0)} / ${fmt(gpuClockMax, 0, " MHz")}`;
 
   /**
    * Le contenu est produit à la demande par rang d'onglet : pendant la transition, le
@@ -429,7 +524,8 @@ export default function App() {
               value={fmt(val(reading, "gpuPowerW"), 1, " W")}
               provider={providerOf(reading, "gpuPowerW")}
               hint={t.gpuPowerHint}
-              note={fmt(val(reading, "gpuClockMhz"), 0, " MHz")}
+              badge={gpuBadge}
+              note={gpuClockNote}
             >
               <Sparkline values={spark("gpuPowerW")} color="#7ee787" />
             </MetricCard>

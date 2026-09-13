@@ -42,10 +42,13 @@ const en = {
   gpuTemp: "GPU temp.",
   gpuTempHint: "GPU temperature and load.",
   gpuPower: "GPU power",
-  gpuPowerHint: "GPU power draw and clock.",
+  gpuPowerHint:
+    "GPU power draw, and its clock against the card ceiling. At rest a GPU clocks down; staying near the ceiling with no load burns watts for nothing.",
   gpuLoadUnit: " % load",
   badgeCapped: "capped",
   badgeIdle: "idle",
+  badgeGpuPinned: "pinned",
+  badgeGpuBusy: "in use",
   measuredBy: (provider: string) => `Measured by ${provider}`,
 
   // Comparaison des phases
@@ -130,10 +133,13 @@ const fr: Strings = {
   gpuTemp: "Temp. GPU",
   gpuTempHint: "Température et charge GPU.",
   gpuPower: "Puis. GPU",
-  gpuPowerHint: "Puissance et fréquence GPU.",
+  gpuPowerHint:
+    "Puissance GPU, et sa fréquence rapportée au plafond de la carte. Au repos un GPU redescend ; rester près du plafond sans charge consomme pour rien.",
   gpuLoadUnit: " % charge",
   badgeCapped: "plafonné",
   badgeIdle: "repos",
+  badgeGpuPinned: "épinglé",
+  badgeGpuBusy: "en service",
   measuredBy: (provider) => `Mesure fournie par ${provider}`,
 
   compareHint: "Comparer sous charge stable.",

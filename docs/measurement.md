@@ -1,8 +1,12 @@
 # Ce que valent les chiffres
 
-Toutes les valeurs de ce document ont été mesurées sur la machine de développement :
-i9-14900K (24 cœurs, 32 threads, nominal 3200 MHz), RTX 4080 SUPER, ASUS ProArt
-Z790-CREATOR WIFI, Windows 11 Pro 26200.
+Sauf mention contraire, les valeurs de ce document ont été mesurées sur la machine de
+développement : i9-14900K (24 cœurs, 32 threads, nominal 3200 MHz), RTX 4080 SUPER,
+ASUS ProArt Z790-CREATOR WIFI, Windows 11 Pro 26200.
+
+Une seconde machine sert de contrepoint là où le comportement d'un portable diffère de
+celui d'une tour : Dell mobile i9-13950HX, RTX 2000 Ada, dont CPU et GPU partagent les
+mêmes caloducs.
 
 ## La mesure décisive n'est pas une température
 
@@ -75,6 +79,64 @@ flowchart TD
     lire -->|vrai| turbo["TURBO<br/>turbo engagé"]
     lire -->|faux| plaf["plafonné<br/>turbo interdit"]
 ```
+
+## Le GPU au repos : trois états, un seul qui alerte
+
+Sur un portable, CPU et GPU partagent les mêmes caloducs. Un GPU qui consomme sans rien
+produire chauffe le die CPU **sans qu'aucune mesure CPU ne l'explique** : la température
+monte, la puissance package ne bouge pas. C'est la lecture que l'interface doit rendre
+possible.
+
+### Pourquoi la fréquence se rapporte au plafond
+
+Une fréquence brute ne se juge pas. Relevé simultané, au repos :
+
+| Carte | Fréquence | Plafond (`clocks.max.sm`) | Rapport |
+|---|---|---|---|
+| RTX 4080 SUPER (tour) | 210 MHz | 3105 MHz | **7 %** |
+| RTX 2000 Ada (portable) | 2115 MHz | ~2115 MHz | **~100 %** |
+
+2115 MHz est un plein régime sur l'une et n'existe pas sur l'autre. Seul le rapport se
+compare, exactement comme `CpuMaxCorePct` rapporte la fréquence cœur au nominal. D'où la
+métrique `GpuClockMaxMhz` : sans elle, `GpuClockMhz` ne conclut rien.
+
+Le seuil est posé à **50 %**, loin des deux régimes observés.
+
+### Pourquoi le décodage vidéo compte comme une charge
+
+`utilization.gpu` reste bas pendant une lecture vidéo : le travail est fait par les
+moteurs dédiés, NVDEC et NVENC, qui ont leurs propres compteurs. Une vidéo en plein écran
+passerait donc pour un repos — et un GPU qui décode n'a rien d'épinglé.
+
+La charge retenue est le **maximum des trois** : `utilization.gpu`,
+`utilization.decoder`, `utilization.encoder`. Le garde-fou précède volontairement
+l'actionneur : le jour où un bridage s'appuiera sur ce prédicat, brider pendant une
+lecture vidéo coûterait des images perdues.
+
+### Les trois états
+
+| Charge | Fréquence / plafond | Badge | Sens |
+|---|---|---|---|
+| au-dessus du plancher | — | **en service** | la mesure ne conclut pas : une fréquence haute y est normale |
+| sous le plancher | < 50 % | **repos** | la carte est redescendue, rien à signaler |
+| sous le plancher | > 50 % | **épinglé** | **consomme sans rien produire** |
+
+Les couleurs gardent le sens qu'elles ont pour le CPU : `hot` l'état coûteux, `cool`
+l'état économe, `idle` celui où la mesure ne permet pas de conclure. À noter que « repos »
+est ici l'état *souhaitable*, là où pour le CPU il marque l'absence de conclusion — c'est
+le badge qui change de sens, pas la couleur.
+
+Mêmes garde-fous que pour le turbo, pour les mêmes raisons : hystérésis de deux mesures
+concordantes sur la fréquence, et deux seuils de charge (10 % / 20 %) pour ne pas osciller
+sur le jitter du repos.
+
+### Ce que ce badge aurait évité
+
+Les grandeurs nécessaires — fréquence et charge GPU — étaient **déjà collectées et déjà
+affichées** avant ce badge. Ce qui manquait n'était pas la donnée mais son interprétation :
+rien ne disait que leur combinaison était anormale. Un diagnostic mené à la main sur un
+portable a demandé sept échanges pour établir ce que ces trois états donnent d'un coup
+d'œil.
 
 ## Politique et mesure sont deux choses
 

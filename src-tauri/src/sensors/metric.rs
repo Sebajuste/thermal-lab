@@ -26,8 +26,19 @@ pub enum Metric {
     BoardTempC,
     GpuTempC,
     GpuPowerW,
+    /// Frequence du domaine SM, l'analogue GPU de la frequence coeur.
     GpuClockMhz,
+    /// Plafond de frequence SM annonce par la carte. Constante propre au modele, sans
+    /// laquelle `GpuClockMhz` ne se compare a rien : 2115 MHz est un repos sur l'une et
+    /// un plein regime sur l'autre.
+    GpuClockMaxMhz,
     GpuUtilPct,
+    /// Occupation du decodeur video (NVDEC). Distincte de `GpuUtilPct`, qui reste bas
+    /// pendant une lecture video : c'est ce qui separe un GPU inoccupe d'un GPU qui
+    /// decode.
+    GpuDecodeUtilPct,
+    /// Occupation de l'encodeur video (NVENC) : capture, diffusion.
+    GpuEncodeUtilPct,
 }
 
 impl Metric {
@@ -44,7 +55,10 @@ impl Metric {
         Metric::GpuTempC,
         Metric::GpuPowerW,
         Metric::GpuClockMhz,
+        Metric::GpuClockMaxMhz,
         Metric::GpuUtilPct,
+        Metric::GpuDecodeUtilPct,
+        Metric::GpuEncodeUtilPct,
     ];
 
     pub const fn unit(self) -> &'static str {
@@ -54,8 +68,10 @@ impl Metric {
             Metric::CpuMaxCorePct
             | Metric::CpuAvgPerfPct
             | Metric::CpuUtilPct
-            | Metric::GpuUtilPct => "%",
-            Metric::CpuNominalMhz | Metric::GpuClockMhz => "MHz",
+            | Metric::GpuUtilPct
+            | Metric::GpuDecodeUtilPct
+            | Metric::GpuEncodeUtilPct => "%",
+            Metric::CpuNominalMhz | Metric::GpuClockMhz | Metric::GpuClockMaxMhz => "MHz",
         }
     }
 }

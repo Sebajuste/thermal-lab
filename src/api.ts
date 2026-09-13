@@ -12,7 +12,10 @@ export type MetricKey =
   | "gpuTempC"
   | "gpuPowerW"
   | "gpuClockMhz"
-  | "gpuUtilPct";
+  | "gpuClockMaxMhz"
+  | "gpuUtilPct"
+  | "gpuDecodeUtilPct"
+  | "gpuEncodeUtilPct";
 
 /** Une valeur et le fournisseur qui l'a produite. */
 export interface Sample {
