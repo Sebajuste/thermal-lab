@@ -36,7 +36,10 @@ pub struct Tray {
 /// de zone de notification.
 fn tinted(src: &Image<'_>, rgb: (f32, f32, f32)) -> Image<'static> {
     let mut rgba = src.rgba().to_vec();
-    for px in rgba.chunks_exact_mut(4) {
+    // `as_chunks_mut` plutot que `chunks_exact_mut` : la taille etant constante, le
+    // compilateur rend un tableau de 4 et non une tranche, donc sans borne a verifier.
+    let (pixels, _) = rgba.as_chunks_mut::<4>();
+    for px in pixels {
         let lum = 0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32;
         // Racine quatrieme plutot que lineaire : l'icone d'origine est sombre, une
         // teinte proportionnelle a sa luminance la rendrait presque noire.
