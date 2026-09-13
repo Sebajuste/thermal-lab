@@ -115,6 +115,8 @@ export interface PhasesSnapshot {
 export interface UiState {
   pinned: boolean;
   autostart: boolean;
+  /** Mise à jour sans intervention : cochée, l'application se remplace elle-même. */
+  autoUpdate: boolean;
   /** Celle du paquet installé, celle que la mise à jour compare. */
   version: string;
 }
@@ -145,6 +147,9 @@ export const resetPhases = () => invoke<void>("reset_phases");
 export const readUiState = () => invoke<UiState>("ui_state");
 export const setPinned = (pinned: boolean) => invoke<void>("set_pinned", { pinned });
 export const setAutostart = (on: boolean) => invoke<boolean>("set_autostart", { on });
+
+/** Rend l'état réellement enregistré : une écriture refusée décoche la case. */
+export const setAutoUpdate = (on: boolean) => invoke<boolean>("set_auto_update", { on });
 
 /** Miroir de `update::Progress`, poussé par l'événement `update-progress`. */
 export interface UpdateProgress {

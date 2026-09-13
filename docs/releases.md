@@ -49,6 +49,52 @@ La recherche au lancement échoue en silence — ne pas joindre GitHub n'est pas
 dont l'utilisateur a quelque chose à faire. Celle du bouton, dans l'onglet Système, rend
 son erreur : elle a été demandée.
 
+## Le mode automatique
+
+La case « Mettre à jour automatiquement », dans l'onglet Système, est décochée par
+défaut et conservée dans `settings.json`, au dossier de configuration du compte. Le
+défaut n'est pas une prudence de façade : une application élevée qui se remplace elle-même
+sans qu'on l'ait autorisée n'est pas distinguable, vue du poste, de ce qu'on lui
+reprocherait.
+
+Cochée, une boucle de veille (`update::watch`) bat toutes les cinq minutes et se pose
+trois questions, dans cet ordre :
+
+1. **la case est-elle cochée ?** Sinon elle oublie sa dernière recherche, de sorte que
+   recocher relance une recherche au battement suivant plutôt que six heures plus tard ;
+2. **le panneau est-il ouvert ?** Si oui, elle passe son tour. Installer veut dire
+   remplacer l'exécutable et relancer le processus : le faire pendant qu'on lit ses
+   températures ferait disparaître la fenêtre au milieu d'une mesure. Le panneau se
+   referme dès qu'il perd le focus, l'attente se résout donc d'elle-même ; elle ne dure
+   que pour un panneau épinglé, où personne n'est surpris de le voir rester ;
+3. **six heures se sont-elles écoulées depuis la dernière recherche ?** Une application
+   résidante tourne des semaines, et un outil de mesure n'a pas à devenir un client de
+   sondage.
+
+La veille tourne quoi qu'il arrive et relit la préférence à chaque battement : cocher ou
+décocher n'a rien à démarrer ni à arrêter. Elle échoue en silence des deux côtés — une
+installation ratée sera retentée au tour suivant, et le bouton reste là pour obtenir une
+erreur lisible, puisqu'on la lui a demandée.
+
+Le chemin d'installation est **le même** que celui du bouton, drapeau d'exclusion compris :
+ouvrir le panneau pendant un téléchargement de fond n'offre pas un bouton qui en lancerait
+un second. La barre de progression s'affiche alors sans qu'on ait cliqué.
+
+### Pourquoi aucune invite UAC ne bloque la boucle
+
+L'installateur est `currentUser` (voir plus bas) et le binaire tourne déjà élevé par son
+manifeste : le processus fils hérite du jeton sans que Windows repose la question. Une
+invite qui apparaîtrait sans personne devant l'écran laisserait l'installation en suspens
+— ce n'est pas le cas ici.
+
+### Ce que la relance conserve
+
+Sous Windows, le plugin lance l'installateur puis termine le processus lui-même ;
+l'installateur relance ensuite l'application avec les arguments du lancement courant.
+`--silent` en fait partie : une mise à jour partie d'une session ouverte en fond ne ramène
+pas le panneau à l'écran. Le `app.restart()` qui suit l'appel n'est atteint que sur les
+plateformes où le plugin rend la main.
+
 ## La signature de mise à jour
 
 Un paquet téléchargé est vérifié contre une clé publique inscrite dans la configuration.

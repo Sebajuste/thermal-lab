@@ -3,6 +3,7 @@ mod capabilities;
 mod flyout;
 mod phases;
 mod power;
+mod settings;
 mod tools;
 mod tray;
 mod update;
@@ -21,6 +22,7 @@ use flyout::Flyout;
 use phases::{PhaseRecorder, PhasesSnapshot};
 use power::PowerState;
 use sensors::{Reading, SensorHub};
+use settings::Settings;
 
 const SAMPLE_PERIOD: Duration = Duration::from_millis(1000);
 
@@ -34,6 +36,8 @@ pub(crate) const SILENT_FLAG: &str = "--silent";
 struct UiState {
     pinned: bool,
     autostart: bool,
+    /// Mise a jour sans intervention : cochee, l'application se remplace elle-meme.
+    auto_update: bool,
     /// Celle du paquet, pas celle du frontend : c'est elle que la mise a jour compare.
     version: String,
 }
@@ -105,6 +109,7 @@ fn ui_state(app: AppHandle) -> UiState {
     UiState {
         pinned: app.state::<Flyout>().is_pinned(),
         autostart: autostart::is_enabled(),
+        auto_update: app.state::<Settings>().prefs().auto_update,
         version: app.package_info().version.to_string(),
     }
 }
@@ -118,6 +123,13 @@ fn set_pinned(app: AppHandle, pinned: bool) {
 fn set_autostart(app: AppHandle, on: bool) -> Result<bool, String> {
     tray::set_autostart(&app, on)?;
     Ok(autostart::is_enabled())
+}
+
+/// Rend l'etat reellement enregistre, et non celui demande : une ecriture refusee doit
+/// decocher la case plutot que promettre une mise a jour automatique qui n'aura pas lieu.
+#[tauri::command]
+fn set_auto_update(app: AppHandle, on: bool) -> Result<bool, String> {
+    Ok(app.state::<Settings>().set_auto_update(on)?.auto_update)
 }
 
 /// Bascule le bridage, puis remet tout le monde d'accord : accumulateur de phases,
@@ -162,6 +174,7 @@ pub fn run() {
             app.manage(Arc::clone(&recorder));
             app.manage(Flyout::new());
             app.manage(update::Pending::default());
+            app.manage(Settings::load(&handle));
 
             // L'etat d'alimentation precede tout le reste : il decide de l'icone posee,
             // de la coche du menu et de la phase qui commence a accumuler.
@@ -178,6 +191,11 @@ pub fn run() {
                 sink.record(reading);
                 tray::refresh_tooltip(&tick_handle, reading, sink.is_optimized());
             }));
+
+            // La veille des mises a jour tourne quoi qu'il arrive : c'est elle qui lit
+            // la preference a chaque battement, et non l'inverse. La cocher ou la
+            // decocher n'a donc rien a demarrer ni a arreter.
+            update::watch(handle.clone());
 
             if !std::env::args().any(|a| a == SILENT_FLAG) {
                 flyout::show(&handle);
@@ -211,6 +229,7 @@ pub fn run() {
             ui_state,
             set_pinned,
             set_autostart,
+            set_auto_update,
             update::check_update,
             update::install_update
         ])

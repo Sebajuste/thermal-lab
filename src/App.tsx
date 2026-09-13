@@ -12,6 +12,7 @@ import {
   readUiState,
   resetPhases,
   setAutostart,
+  setAutoUpdate,
   setOptimization,
   setPinned,
   val,
@@ -83,6 +84,7 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("live");
   const [pinned, setPinnedState] = useState(false);
   const [autostart, setAutostartState] = useState(false);
+  const [autoUpdate, setAutoUpdateState] = useState(false);
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   // La bascule passe par une tâche planifiée, donc par une invite UAC : le temps que
@@ -105,6 +107,7 @@ export default function App() {
       .then((s) => {
         setPinnedState(s.pinned);
         setAutostartState(s.autostart);
+        setAutoUpdateState(s.autoUpdate);
         setVersion(s.version);
       })
       .catch(() => {});
@@ -247,6 +250,17 @@ export default function App() {
     }
   }, [autostart, autostartBusy]);
 
+  // Aucun état à attendre ici : la préférence est un fichier, et la veille la relit
+  // d'elle-même au battement suivant.
+  const toggleAutoUpdate = useCallback(async () => {
+    setError(null);
+    try {
+      setAutoUpdateState(await setAutoUpdate(!autoUpdate));
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [autoUpdate]);
+
   const reset = useCallback(() => {
     void resetPhases().then(() => readPhases().then(setPhases));
     setHistory([]);
@@ -316,8 +330,21 @@ export default function App() {
                 </span>
               </label>
 
+              <label
+                className="check"
+                title="Recherche toutes les six heures, installation sans confirmation. Elle attend que le panneau soit fermé : l'application se relance seule."
+              >
+                <input
+                  type="checkbox"
+                  checked={autoUpdate}
+                  onChange={() => void toggleAutoUpdate()}
+                />
+                <span>Mettre à jour automatiquement</span>
+              </label>
+
               <UpdateRow
                 version={version}
+                auto={autoUpdate}
                 update={update}
                 onFound={setUpdate}
                 onError={setError}

@@ -11,6 +11,8 @@ import Icon from "./Icon";
 interface Props {
   /** Version du paquet installé, telle que la connaît Rust. */
   version: string;
+  /** Le mode automatique est coché : la mise à jour n'attend plus qu'un panneau fermé. */
+  auto: boolean;
   update: UpdateInfo | null;
   onFound: (u: UpdateInfo | null) => void;
   onError: (message: string) => void;
@@ -21,8 +23,18 @@ interface Props {
  * le schéma d'alimentation, la remplacer sous les pieds de quelqu'un en pleine mesure
  * serait au mieux impoli. Le bouton dit donc ce qu'il va faire — installer *et*
  * relancer — parce que le panneau disparaîtra.
+ *
+ * Cochée, l'option automatique ne retire pas le bouton : elle installe panneau fermé, et
+ * quelqu'un qui vient de voir la version disponible n'a aucune raison d'attendre six
+ * heures pour l'obtenir.
  */
-export default function UpdateRow({ version, update, onFound, onError }: Props) {
+export default function UpdateRow({
+  version,
+  auto,
+  update,
+  onFound,
+  onError,
+}: Props) {
   const [busy, setBusy] = useState<"check" | "install" | null>(null);
   // Distinct de `update === null` : au premier rendu on ne sait rien, après une
   // recherche infructueuse on sait que rien n'attend. Les deux méritent un mot différent.
@@ -62,6 +74,13 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
     }
   }, [busy, onError]);
 
+  // Des octets qui arrivent sans qu'on ait cliqué : la veille installe. Le panneau vient
+  // d'être rouvert au milieu du téléchargement — rare, mais afficher un bouton
+  // « Installer » pendant ce temps proposerait un second téléchargement du même paquet,
+  // que Rust refuserait.
+  const background = busy === null && progress !== null;
+  const installing = busy === "install" || background;
+
   const pct =
     progress && progress.total
       ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
@@ -76,11 +95,11 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
         {update ? (
           <button
             className="ghost"
-            disabled={busy !== null}
+            disabled={busy !== null || background}
             onClick={() => void install()}
             title={update.notes ?? undefined}
           >
-            {busy !== "install"
+            {!installing
               ? `Installer la v${update.version} et relancer`
               : pct !== null
                 ? `Téléchargement ${pct} %`
@@ -101,7 +120,7 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
         )}
       </div>
 
-      {busy === "install" && (
+      {installing && (
         // Barre déterminée quand la taille est annoncée, rayures animées sinon : une
         // barre pleine à 100 % qui ne bouge plus ressemble à un blocage.
         <div
@@ -113,12 +132,13 @@ export default function UpdateRow({ version, update, onFound, onError }: Props) 
         </div>
       )}
 
-      {update && busy !== "install" && (
+      {update && !installing && (
         <div className="banner inline">
           <Icon name="launch" size={14} />
           <span>
             La v{update.version} remplacera la v{update.current}. L'application se
             ferme et se rouvre ; le schéma d'alimentation reste en l'état.
+            {auto && " Sans clic, elle s'installera une fois ce panneau fermé."}
           </span>
         </div>
       )}
