@@ -75,6 +75,43 @@ Tant que `pubkey` est vide, l'application démarre et cherche normalement : la c
 qu'au moment de vérifier le paquet téléchargé. L'échec n'arriverait donc qu'à
 l'installation, au pire moment. À renseigner avant la première release.
 
+## Le mot de passe vide, et un message trompeur
+
+La cle generee ici n'a pas de mot de passe. Le secret
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` doit donc porter une **chaine vide** — et non ne pas
+exister : le workflow resout un secret absent en chaine vide et pose la variable malgre
+tout, si bien que supprimer le secret ne change rien. Pour qu'elle n'existe pas, il
+faudrait retirer la ligne du workflow.
+
+La saisie interactive de `gh secret set` lit l'entree standard telle quelle. Y repondre
+par une touche Entree seule peut y laisser un caractere, et un mot de passe d'un caractere
+suffit a tout casser. Pour forcer le vide :
+
+```
+printf '' | gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo Sebajuste/thermal-lab
+```
+
+Le message rendu alors par Tauri est **failed to decode secret key: incorrect updater
+private key password**. Il designe le mot de passe, mais recouvre en realite tout echec de
+dechiffrement de la cle — un fichier altere en transit donne le meme. Le depart se fait en
+deux essais locaux, qui coutent une seconde :
+
+```
+npx tauri signer sign -f "$env:USERPROFILE\.tauri\thermal-lab.key" -p "" fichier
+npx tauri signer sign -f "$env:USERPROFILE\.tauri\thermal-lab.key" -p "x" fichier
+```
+
+Si le premier passe et que le second rend le message du CI, la cle est saine et c'est le
+mot de passe qui est en cause.
+
+Enfin, depuis PowerShell, envoyer un fichier a `gh secret set` demande `-Raw` : sans lui,
+`Get-Content` decoupe en lignes et le pipeline les recompose, ce qui suffit a casser le
+checksum minisign.
+
+```powershell
+Get-Content -Raw "$env:USERPROFILE\.tauri\thermal-lab.key" | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo Sebajuste/thermal-lab
+```
+
 ## Le piege : `createUpdaterArtifacts`
 
 `bundle.createUpdaterArtifacts` vaut **`false`** par defaut. Sans lui, le bundler produit
