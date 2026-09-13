@@ -56,10 +56,9 @@ impl Settings {
     /// cochee qui redeviendrait vide au prochain lancement.
     pub fn set_auto_update(&self, on: bool) -> Result<Prefs, String> {
         let next = {
-            let mut prefs = self
-                .prefs
-                .lock()
-                .map_err(|_| "reglages inutilisables".to_string())?;
+            let mut prefs = self.prefs.lock().map_err(|_| {
+                crate::t!("settings unusable", "réglages inutilisables").to_string()
+            })?;
             prefs.auto_update = on;
             *prefs
         };
@@ -69,13 +68,23 @@ impl Settings {
 
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
         let Some(path) = self.path.as_ref() else {
-            return Err("dossier de configuration introuvable".into());
+            return Err(crate::t!(
+                "configuration folder not found",
+                "dossier de configuration introuvable"
+            )
+            .into());
         };
         if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).map_err(|e| format!("{} : {e}", dir.display()))?;
+            fs::create_dir_all(dir).map_err(|e| {
+                let dir = dir.display();
+                crate::t!(format!("{dir}: {e}"), format!("{dir} : {e}"))
+            })?;
         }
         let raw = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
-        fs::write(path, raw).map_err(|e| format!("{} : {e}", path.display()))
+        fs::write(path, raw).map_err(|e| {
+            let path = path.display();
+            crate::t!(format!("{path}: {e}"), format!("{path} : {e}"))
+        })
     }
 }
 

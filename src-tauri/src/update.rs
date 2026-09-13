@@ -121,14 +121,18 @@ async fn install_pending(app: &AppHandle) -> Result<(), String> {
     let update = {
         let state = app.state::<Pending>();
         if state.installing.swap(true, Ordering::SeqCst) {
-            return Err("une installation est deja en cours".into());
+            return Err(crate::t!(
+                "an installation is already running",
+                "une installation est déjà en cours"
+            )
+            .into());
         }
         let taken = state.slot.lock().ok().and_then(|mut slot| slot.take());
         match taken {
             Some(update) => update,
             None => {
                 state.installing.store(false, Ordering::SeqCst);
-                return Err("aucune mise a jour en attente".into());
+                return Err(crate::t!("no pending update", "aucune mise à jour en attente").into());
             }
         }
     };
