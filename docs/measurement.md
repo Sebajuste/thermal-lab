@@ -87,20 +87,35 @@ produire chauffe le die CPU **sans qu'aucune mesure CPU ne l'explique** : la tem
 monte, la puissance package ne bouge pas. C'est la lecture que l'interface doit rendre
 possible.
 
-### Pourquoi la fréquence se rapporte au plafond
+### Deux critères, parce qu'aucun ne suffit seul
 
 Une fréquence brute ne se juge pas. Relevé simultané, au repos :
 
-| Carte | Fréquence | Plafond (`clocks.max.sm`) | Rapport |
-|---|---|---|---|
-| RTX 4080 SUPER (tour) | 210 MHz | 3105 MHz | **7 %** |
-| RTX 2000 Ada (portable) | 2115 MHz | ~2115 MHz | **~100 %** |
+| Carte | Fréquence | Plafond (`clocks.max.sm`) | Rapport | P-state |
+|---|---|---|---|---|
+| RTX 4080 SUPER (tour) | 210 MHz | 3105 MHz | **7 %** | **P8** |
+| RTX 2000 Ada (portable) | 2115 MHz | 3105 MHz | **68 %** | **P3** |
 
-2115 MHz est un plein régime sur l'une et n'existe pas sur l'autre. Seul le rapport se
-compare, exactement comme `CpuMaxCorePct` rapporte la fréquence cœur au nominal. D'où la
-métrique `GpuClockMaxMhz` : sans elle, `GpuClockMhz` ne conclut rien.
+Seul le rapport se compare, exactement comme `CpuMaxCorePct` rapporte la fréquence cœur au
+nominal. D'où la métrique `GpuClockMaxMhz` : sans elle, `GpuClockMhz` ne conclut rien.
 
-Le seuil est posé à **50 %**, loin des deux régimes observés.
+**Mais le plafond n'est pas celui de la carte.** Les deux annoncent 3105 MHz : une 4080
+SUPER de bureau et une RTX 2000 Ada mobile n'ont évidemment pas le même boost, et
+`clocks.max.sm` rapporte le plafond *architectural* de la génération. Le rapport reste
+discriminant sur ces deux cartes — 7 % contre 68 % — mais il s'écrase, et une carte au
+boost modeste, épinglée à son propre plafond, passerait sous un seuil posé à **50 %**.
+
+Le **P-state** ne souffre pas de ce défaut : le pilote le normalise carte par carte, `P0`
+au maximum et `P8` ou `P12` au repos. « Au repos sans être redescendu dans un état
+profond » est l'anomalie même, sans dénominateur à interpréter. Le seuil est à **P5**.
+
+Les deux critères sont unis par un **OU**. Le P-state rattrape ce que le rapport
+laisserait passer ; le rapport couvre les fournisseurs qui donnent une fréquence sans
+P-state — seul NVML expose le second. Aucun des deux renseigné, le badge se tait.
+
+> Cette section a d'abord affirmé un plafond de ~2115 MHz pour la RTX 2000 Ada. C'était
+> une déduction présentée comme une mesure, et c'est elle qui avait fait croire le seuil
+> plus robuste qu'il ne l'était.
 
 ### Pourquoi le décodage vidéo compte comme une charge
 

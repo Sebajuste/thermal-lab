@@ -61,16 +61,28 @@ const TURBO_THRESHOLD_PCT = 105;
 type TurboView = "boost" | "capped" | "idle";
 
 /**
- * Un GPU au repos redescend franchement : 210 MHz sur les 3105 possibles, mesuré sur
- * RTX 4080 SUPER. Rester près du plafond sans rien calculer n'est pas un repos coûteux,
- * c'est un état contraint — et sur un portable ces watts traversent les caloducs du CPU
- * avant de sortir, ce qui explique une température CPU que la consommation CPU ne
- * justifie pas.
+ * Un GPU au repos redescend franchement. Rester près du plafond sans rien calculer n'est
+ * pas un repos coûteux, c'est un état contraint — et sur un portable ces watts traversent
+ * les caloducs du CPU avant de sortir, ce qui explique une température CPU que la
+ * consommation CPU ne justifie pas.
  *
- * Le seuil est relatif au plafond de la carte, faute de quoi il ne voudrait rien dire :
- * 2115 MHz est un plein régime sur un GPU mobile et un régime intermédiaire ailleurs.
+ * Deux critères, unis par un OU, parce qu'aucun des deux ne suffit seul.
+ *
+ * `clocks.max.sm` s'est révélé être le plafond **architectural** de la génération —
+ * 3105 MHz sur une RTX 4080 SUPER comme sur une RTX 2000 Ada mobile — et non le boost de
+ * la carte. Le rapport reste discriminant sur ces deux-là (7 % au repos contre 68 %
+ * épinglé) mais il s'écrase : une carte au boost modeste, épinglée à son propre plafond,
+ * passerait sous le seuil et serait déclarée au repos.
+ *
+ * Le P-state ne souffre pas de ce défaut : le pilote le normalise carte par carte, P0 au
+ * maximum, P8 ou P12 au repos. « Au repos sans être redescendu dans un état profond » est
+ * l'anomalie même, sans dénominateur à interpréter. Il ne remplace pas le premier critère
+ * pour autant : seul NVML le fournit, là où la fréquence peut venir d'ailleurs.
  */
 const GPU_PINNED_CLOCK_PCT = 50;
+
+/** Au-delà, la carte est dans un état de repos : en deçà, elle se tient prête. */
+const GPU_PINNED_PSTATE = 5;
 
 /**
  * Charge en dessous de laquelle le GPU est considéré inoccupé. Deux seuils comme pour le
@@ -303,8 +315,18 @@ export default function App() {
 
         const gpuClock = val(r, "gpuClockMhz");
         const gpuClockMax = val(r, "gpuClockMaxMhz");
-        if (gpuClock !== null && gpuClockMax !== null && gpuClockMax > 0) {
-          const high = (gpuClock / gpuClockMax) * 100 > GPU_PINNED_CLOCK_PCT;
+        const gpuPState = val(r, "gpuPerfStateIndex");
+        const byClock =
+          gpuClock !== null && gpuClockMax !== null && gpuClockMax > 0
+            ? (gpuClock / gpuClockMax) * 100 > GPU_PINNED_CLOCK_PCT
+            : null;
+        const byPState =
+          gpuPState !== null ? gpuPState <= GPU_PINNED_PSTATE : null;
+
+        // Un seul critère renseigné suffit à conclure ; aucun laisse le badge muet
+        // plutôt que de le faire répondre sur rien.
+        if (byClock !== null || byPState !== null) {
+          const high = byClock === true || byPState === true;
           const g = pendingGpuPinned.current;
           pendingGpuPinned.current =
             high === g.value

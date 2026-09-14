@@ -14,6 +14,7 @@ export type MetricKey =
   | "gpuClockMhz"
   | "gpuClockMaxMhz"
   | "gpuUtilPct"
+  | "gpuPerfStateIndex"
   | "gpuDecodeUtilPct"
   | "gpuEncodeUtilPct";
 

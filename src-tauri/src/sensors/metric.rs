@@ -33,6 +33,11 @@ pub enum Metric {
     /// un plein regime sur l'autre.
     GpuClockMaxMhz,
     GpuUtilPct,
+    /// Etat de performance annonce par le pilote, en indice : 0 le plus performant, 8 ou
+    /// 12 le repos selon les cartes. Contrairement a la frequence, il est normalise par
+    /// le pilote carte par carte — c'est lui qui dit dans quel etat il se tient, sans
+    /// dependre d'un plafond a interpreter.
+    GpuPerfStateIndex,
     /// Occupation du decodeur video (NVDEC). Distincte de `GpuUtilPct`, qui reste bas
     /// pendant une lecture video : c'est ce qui separe un GPU inoccupe d'un GPU qui
     /// decode.
@@ -57,6 +62,7 @@ impl Metric {
         Metric::GpuClockMhz,
         Metric::GpuClockMaxMhz,
         Metric::GpuUtilPct,
+        Metric::GpuPerfStateIndex,
         Metric::GpuDecodeUtilPct,
         Metric::GpuEncodeUtilPct,
     ];
@@ -72,6 +78,8 @@ impl Metric {
             | Metric::GpuDecodeUtilPct
             | Metric::GpuEncodeUtilPct => "%",
             Metric::CpuNominalMhz | Metric::GpuClockMhz | Metric::GpuClockMaxMhz => "MHz",
+            // Un indice d'etat, sans grandeur physique.
+            Metric::GpuPerfStateIndex => "",
         }
     }
 }

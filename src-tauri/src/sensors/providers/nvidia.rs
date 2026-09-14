@@ -8,7 +8,7 @@
 //! ~16 ms de CPU chacun pour initialiser NVML, le charger, l'afficher et mourir : le
 //! poste dominant de l'application au repos, pour la meme mesure.
 
-use nvml_wrapper::enum_wrappers::device::{Clock, TemperatureSensor};
+use nvml_wrapper::enum_wrappers::device::{Clock, PerformanceState, TemperatureSensor};
 use nvml_wrapper::Nvml;
 
 use crate::sensors::metric::{Metric, Reading};
@@ -24,6 +24,7 @@ const PROVIDES: &[Metric] = &[
     Metric::GpuClockMhz,
     Metric::GpuClockMaxMhz,
     Metric::GpuUtilPct,
+    Metric::GpuPerfStateIndex,
     Metric::GpuDecodeUtilPct,
     Metric::GpuEncodeUtilPct,
 ];
@@ -104,6 +105,14 @@ impl Provider for NvidiaProvider {
         }
         if let Ok(u) = gpu.utilization_rates() {
             out.offer(Metric::GpuUtilPct, u.gpu as f64, ID);
+        }
+        // `Unknown` n'est pas un indice : NVML l'encode a 32, valeur qui se rangerait
+        // dans la metrique comme un etat tres repose — l'inverse exact de ce qu'elle
+        // signifie. On ne publie rien plutot qu'un faux.
+        if let Ok(p) = gpu.performance_state() {
+            if p != PerformanceState::Unknown {
+                out.offer(Metric::GpuPerfStateIndex, p.as_c() as f64, ID);
+            }
         }
         if let Ok(u) = gpu.decoder_utilization() {
             out.offer(Metric::GpuDecodeUtilPct, u.utilization as f64, ID);
