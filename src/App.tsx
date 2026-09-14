@@ -96,6 +96,60 @@ const fmt = (v: number | null, digits = 0, unit = "") =>
 const shortCpu = (name: string | null) =>
   name ? name.replace(/\s*\([^)]*\)\s*$/, "") : null;
 
+/**
+ * L'ouverture du panneau, telle que Rust la connaît.
+ *
+ * Le même signal règle la cadence de mesure côté Rust : les deux côtés ne peuvent pas
+ * diverger, et l'interface ne sonde jamais plus vite que le hub ne mesure.
+ *
+ * On part de « replié » plutôt que de l'inverse : lancée au démarrage de session,
+ * l'application charge son interface sans jamais montrer le panneau, et supposer
+ * l'ouverture ferait tourner une salve de sondages pour rien.
+ */
+function usePanelVisible() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const off = listen<boolean>("panel-visibility", (e) => setVisible(e.payload));
+    void readUiState()
+      .then((s) => setVisible(s.panelVisible))
+      .catch(() => {});
+    return () => void off.then((f) => f());
+  }, []);
+
+  return visible;
+}
+
+/**
+ * Un sondage qui ne tourne que panneau ouvert, et qui repart d'une lecture immédiate à
+ * la réouverture — attendre le premier intervalle montrerait des valeurs périmées.
+ *
+ * Replié, l'application n'a personne à informer : l'infobulle de l'icône et les moyennes
+ * du comparatif sont tenues côté Rust, précisément pour ne dépendre d'aucune interface.
+ * Ce qui tournait ici était du travail pur pour le webview — appels, rendu React,
+ * réallocation de l'historique — devant une fenêtre que personne ne regardait.
+ *
+ * `alive` dit si le sondage court toujours : une réponse arrivée après la fermeture n'a
+ * plus rien à écrire.
+ */
+function usePollWhileVisible(
+  poll: (alive: () => boolean) => void,
+  ms: number,
+  visible: boolean,
+) {
+  useEffect(() => {
+    if (!visible) return;
+    let live = true;
+    const run = () => poll(() => live);
+    run();
+    const id = setInterval(run, ms);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [poll, ms, visible]);
+}
+
 export default function App() {
   const [reading, setReading] = useState<Reading | null>(null);
   const [caps, setCaps] = useState<Capabilities | null>(null);
@@ -115,6 +169,8 @@ export default function App() {
   const [autostartBusy, setAutostartBusy] = useState(false);
 
   const [history, setHistory] = useState<Reading[]>([]);
+
+  const visible = usePanelVisible();
 
   // Le turbo peut s'engager sur un seul cœur pendant une fraction de seconde. Afficher
   // le relevé brut ferait clignoter le badge ; on exige deux mesures concordantes.
@@ -155,18 +211,21 @@ export default function App() {
 
   // L'état d'alimentation change aussi hors de l'application : depuis le menu de
   // l'icône, ou depuis Windows lui-même.
-  useEffect(() => {
-    const refresh = () =>
+  const refreshPower = useCallback(
+    (alive: () => boolean) =>
       void readPowerState()
-        .then(setPower)
-        .catch((e) => setError(String(e)));
-    refresh();
-    const id = setInterval(refresh, POWER_MS);
+        .then((p) => alive() && setPower(p))
+        .catch((e) => alive() && setError(String(e))),
+    [],
+  );
+
+  usePollWhileVisible(refreshPower, POWER_MS, visible);
+
+  // La bascule depuis le menu de l'icône se signale d'elle-même : cet abonnement tient
+  // panneau replié, il ne coûte rien tant que rien ne change.
+  useEffect(() => {
     const off = listen<PowerState>("power-changed", (e) => setPower(e.payload));
-    return () => {
-      clearInterval(id);
-      void off.then((f) => f());
-    };
+    return () => void off.then((f) => f());
   }, []);
 
   // Une erreur née dans le menu de l'icône n'a nulle part où s'afficher : elle arrive ici.
@@ -177,37 +236,35 @@ export default function App() {
 
   // Les fournisseurs peuvent apparaître à chaud — lancer Core Temp ne doit pas imposer
   // de redémarrer l'application.
+  // `alive` a une valeur par défaut : `ProvidersPanel` rappelle cette fonction après
+  // avoir lancé un outil, et `setTimeout` ne lui passe aucun argument.
   const refreshCaps = useCallback(
-    () =>
+    (alive: () => boolean = () => true) =>
       void readCapabilities()
-        .then(setCaps)
+        .then((c) => alive() && setCaps(c))
         .catch(() => {}),
     [],
   );
 
-  useEffect(() => {
-    refreshCaps();
-    const id = setInterval(refreshCaps, CAPS_MS);
-    return () => clearInterval(id);
-  }, [refreshCaps]);
+  usePollWhileVisible(refreshCaps, CAPS_MS, visible);
 
-  // Les moyennes sont tenues côté Rust : on ne fait que lire un instantané.
-  useEffect(() => {
-    const refresh = () =>
+  // Les moyennes sont tenues côté Rust et continuent de s'accumuler panneau replié :
+  // il n'y a rien à lire tant que personne ne regarde le comparatif.
+  const refreshPhases = useCallback(
+    (alive: () => boolean) =>
       void readPhases()
-        .then(setPhases)
-        .catch(() => {});
-    refresh();
-    const id = setInterval(refresh, PHASES_MS);
-    return () => clearInterval(id);
-  }, []);
+        .then((p) => alive() && setPhases(p))
+        .catch(() => {}),
+    [],
+  );
 
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
+  usePollWhileVisible(refreshPhases, PHASES_MS, visible);
+
+  const tickSensors = useCallback((alive: () => boolean) => {
+    void (async () => {
       try {
         const r = await readSensors();
-        if (!alive) return;
+        if (!alive()) return;
         setReading(r);
         setHistory((h) => [...h, r].slice(-HISTORY));
 
@@ -256,16 +313,19 @@ export default function App() {
           if (pendingGpuPinned.current.count >= 2) setGpuPinned(high);
         }
       } catch (e) {
-        if (alive) setError(String(e));
+        if (alive()) setError(String(e));
       }
-    };
-    void tick();
-    const id = setInterval(() => void tick(), POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+    })();
   }, []);
+
+  usePollWhileVisible(tickSensors, POLL_MS, visible);
+
+  // L'historique du graphe est vidé au repli. Le conserver recollerait la courbe d'avant
+  // la fermeture sur celle d'après, sans discontinuité visible, alors qu'une heure a pu
+  // s'écouler entre les deux points voisins.
+  useEffect(() => {
+    if (!visible) setHistory([]);
+  }, [visible]);
 
   // Échap referme le panneau : c'est ce que fait tout volet système.
   useEffect(() => {

@@ -53,7 +53,7 @@ Non couvert, par ordre d'intérêt :
 3. **Multi-GPU** — `providers/nvidia.rs` et `providers/amd_gpu.rs` ne lisent chacun que
    la première carte, et le rang unique du registre ne sait pas arbitrer entre elles sur
    une machine mixte. Côté AMD, tout passe par LibreHardwareMonitor : il n'existe pas
-   d'équivalent de `nvidia-smi` livré avec le pilote, seul l'ADLX natif s'en approcherait.
+   d'équivalent de NVML livré avec le pilote, seul l'ADLX natif s'en approcherait.
 4. **Persistance des sessions de mesure** — les moyennes survivent au masquage du
    panneau, pas à la sortie de l'application.
 

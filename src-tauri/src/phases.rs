@@ -7,7 +7,10 @@
 //! accumulateur cote frontend produirait donc des « moyennes » calculees sur quelques
 //! echantillons epars, sans que rien ne le signale.
 //!
-//! Ici l'accumulation suit le thread d'echantillonnage : un tick mesure, un tick compte.
+//! Ici l'accumulation suit le thread d'echantillonnage. Elle compte des secondes et non
+//! des ticks : la cadence se relache quand le panneau est masque — c'est-a-dire pendant
+//! toute la duree qui interesse ce comparatif — et un compteur de ticks annoncerait des
+//! durees fausses des le premier changement de cadence.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -95,12 +98,14 @@ pub struct PhasesSnapshot {
 #[derive(Default)]
 struct Phase {
     metrics: BTreeMap<Metric, Acc>,
-    ticks: u64,
+    seconds: f64,
 }
 
 impl Phase {
-    fn push(&mut self, reading: &Reading) {
-        self.ticks += 1;
+    fn push(&mut self, reading: &Reading, dt_s: f64) {
+        if dt_s.is_finite() && dt_s > 0.0 {
+            self.seconds += dt_s;
+        }
         for metric in TRACKED {
             if let Some(v) = reading.get(*metric) {
                 self.metrics.entry(*metric).or_default().push(v);
@@ -108,14 +113,14 @@ impl Phase {
         }
     }
 
-    fn snapshot(&self, period_s: f64) -> PhaseSnapshot {
+    fn snapshot(&self) -> PhaseSnapshot {
         PhaseSnapshot {
             metrics: self
                 .metrics
                 .iter()
                 .filter_map(|(m, a)| a.stat().map(|s| (*m, s)))
                 .collect(),
-            seconds: (self.ticks as f64 * period_s).round() as u64,
+            seconds: self.seconds.round() as u64,
         }
     }
 }
@@ -128,17 +133,14 @@ struct Inner {
 }
 
 /// Deux accumulateurs, un par etat du bridage, et le drapeau qui dit lequel alimenter.
+#[derive(Default)]
 pub struct PhaseRecorder {
     inner: Mutex<Inner>,
-    period_s: f64,
 }
 
 impl PhaseRecorder {
-    pub fn new(period_s: f64) -> Self {
-        Self {
-            inner: Mutex::new(Inner::default()),
-            period_s,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Aiguille les releves suivants vers l'une ou l'autre phase. Appele au demarrage,
@@ -154,12 +156,14 @@ impl PhaseRecorder {
         self.inner.lock().map(|i| i.optimized).unwrap_or(false)
     }
 
-    pub fn record(&self, reading: &Reading) {
+    /// `dt_s` est le temps reellement ecoule depuis le releve precedent, tel que mesure
+    /// par le thread d'echantillonnage.
+    pub fn record(&self, reading: &Reading, dt_s: f64) {
         if let Ok(mut inner) = self.inner.lock() {
             if inner.optimized {
-                inner.on.push(reading);
+                inner.on.push(reading, dt_s);
             } else {
-                inner.off.push(reading);
+                inner.off.push(reading, dt_s);
             }
         }
     }
@@ -167,8 +171,8 @@ impl PhaseRecorder {
     pub fn snapshot(&self) -> PhasesSnapshot {
         match self.inner.lock() {
             Ok(inner) => PhasesSnapshot {
-                optimized: inner.on.snapshot(self.period_s),
-                free: inner.off.snapshot(self.period_s),
+                optimized: inner.on.snapshot(),
+                free: inner.off.snapshot(),
             },
             Err(_) => PhasesSnapshot::default(),
         }
@@ -194,11 +198,11 @@ mod tests {
 
     #[test]
     fn routes_samples_to_the_active_phase() {
-        let rec = PhaseRecorder::new(1.0);
-        rec.record(&reading(80.0));
+        let rec = PhaseRecorder::new();
+        rec.record(&reading(80.0), 1.0);
         rec.set_optimized(true);
-        rec.record(&reading(60.0));
-        rec.record(&reading(62.0));
+        rec.record(&reading(60.0), 1.0);
+        rec.record(&reading(62.0), 1.0);
 
         let snap = rec.snapshot();
         assert_eq!(snap.free.seconds, 1);
@@ -209,26 +213,45 @@ mod tests {
 
     #[test]
     fn a_metric_nobody_measures_stays_absent() {
-        let rec = PhaseRecorder::new(1.0);
-        rec.record(&reading(70.0));
+        let rec = PhaseRecorder::new();
+        rec.record(&reading(70.0), 1.0);
         let snap = rec.snapshot();
         assert!(!snap.free.metrics.contains_key(&Metric::GpuPowerW));
     }
 
+    /// Le comparatif annonce une duree, pas un nombre de mesures. Panneau masque la
+    /// cadence se relache, et le meme nombre d'echantillons couvre alors bien plus de
+    /// temps : la duree ne peut se lire que dans les intervalles reellement ecoules.
     #[test]
-    fn counts_seconds_from_the_sampling_period() {
-        let rec = PhaseRecorder::new(2.0);
-        rec.record(&reading(70.0));
-        rec.record(&reading(70.0));
-        assert_eq!(rec.snapshot().free.seconds, 4);
+    fn a_changing_cadence_still_yields_a_true_duration() {
+        let rec = PhaseRecorder::new();
+        rec.record(&reading(70.0), 1.0);
+        rec.record(&reading(70.0), 5.0);
+        rec.record(&reading(70.0), 5.0);
+
+        let snap = rec.snapshot();
+        assert_eq!(snap.free.seconds, 11);
+        assert_eq!(snap.free.metrics[&Metric::CpuTempC].n, 3);
+    }
+
+    /// Une reprise de veille rend un intervalle enorme : le hub le plafonne, mais
+    /// l'accumulateur ne doit pas non plus se laisser abimer par une valeur aberrante.
+    #[test]
+    fn an_absurd_interval_does_not_corrupt_the_duration() {
+        let rec = PhaseRecorder::new();
+        rec.record(&reading(70.0), f64::NAN);
+        rec.record(&reading(70.0), -3.0);
+        rec.record(&reading(70.0), 2.0);
+
+        assert_eq!(rec.snapshot().free.seconds, 2);
     }
 
     #[test]
     fn reset_clears_both_phases() {
-        let rec = PhaseRecorder::new(1.0);
-        rec.record(&reading(70.0));
+        let rec = PhaseRecorder::new();
+        rec.record(&reading(70.0), 1.0);
         rec.set_optimized(true);
-        rec.record(&reading(50.0));
+        rec.record(&reading(50.0), 1.0);
         rec.reset();
 
         let snap = rec.snapshot();

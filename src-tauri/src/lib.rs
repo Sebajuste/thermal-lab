@@ -25,7 +25,16 @@ use power::PowerState;
 use sensors::{Reading, SensorHub};
 use settings::Settings;
 
-const SAMPLE_PERIOD: Duration = Duration::from_millis(1000);
+/// Cadence panneau ouvert : c'est le rythme auquel les valeurs s'affichent, et un
+/// affichage qui traine se remarque tout de suite.
+const ACTIVE_PERIOD: Duration = Duration::from_millis(1000);
+
+/// Cadence panneau replie. L'application passe l'essentiel de sa vie ici, et personne
+/// ne lit les valeurs : les deux seuls consommateurs sont l'infobulle de l'icone — vue
+/// au survol seulement — et les moyennes du comparatif, qui ne demandent pas de
+/// resolution fine. Cinq fois moins de mesures, donc cinq fois moins de tout ce qu'elles
+/// coutent : requetes WMI, lectures NVML, memoire partagee.
+const IDLE_PERIOD: Duration = Duration::from_millis(5000);
 
 /// Argument pose par le demarrage automatique : la session s'ouvre, l'application se
 /// range dans la zone de notification sans reclamer l'ecran.
@@ -36,6 +45,9 @@ pub(crate) const SILENT_FLAG: &str = "--silent";
 #[serde(rename_all = "camelCase")]
 struct UiState {
     pinned: bool,
+    /// Etat d'ouverture au moment du montage. L'interface ne peut pas le deviner : elle
+    /// est chargee des le lancement, y compris quand le panneau demarre replie.
+    panel_visible: bool,
     autostart: bool,
     /// Mise a jour sans intervention : cochee, l'application se remplace elle-meme.
     auto_update: bool,
@@ -109,6 +121,7 @@ fn quit_app(app: AppHandle) {
 fn ui_state(app: AppHandle) -> UiState {
     UiState {
         pinned: app.state::<Flyout>().is_pinned(),
+        panel_visible: flyout::is_visible(&app),
         autostart: autostart::is_enabled(),
         auto_update: app.state::<Settings>().prefs().auto_update,
         version: app.package_info().version.to_string(),
@@ -156,6 +169,26 @@ fn sync_power(app: &AppHandle, state: &PowerState) {
     let _ = app.emit("power-changed", state);
 }
 
+/// Regle la cadence de mesure sur ce que le panneau demande. Appele par `flyout` a
+/// chaque ouverture et chaque fermeture — les deux seuls moments ou le besoin change.
+///
+/// `try_state` plutot que `state` : le panneau peut s'ouvrir avant que le hub ne soit
+/// enregistre, et un panneau qui refuse de s'ouvrir serait un bien mauvais prix a payer
+/// pour une cadence.
+pub(crate) fn set_sampling(app: &AppHandle, panel_visible: bool) {
+    if let Some(hub) = app.try_state::<SensorHub>() {
+        hub.set_period(if panel_visible {
+            ACTIVE_PERIOD
+        } else {
+            IDLE_PERIOD
+        });
+    }
+    // Le meme signal regle les deux cotes. Emis ailleurs, il pourrait dire « ouvert »
+    // pendant que le hub mesure toutes les cinq secondes : l'interface interrogerait
+    // quatre fois pour rien.
+    let _ = app.emit("panel-visibility", panel_visible);
+}
+
 /// Une erreur nee dans le menu de l'icone n'a nulle part ou s'afficher : on la pousse
 /// vers le panneau, et on l'ouvre pour qu'elle soit vue.
 pub(crate) fn report_error(app: &AppHandle, message: &str) {
@@ -178,7 +211,9 @@ pub fn run() {
             // Reliquat de l'implementation precedente du demarrage automatique.
             autostart::clear_legacy();
 
-            let recorder = Arc::new(PhaseRecorder::new(SAMPLE_PERIOD.as_secs_f64()));
+            let silent = std::env::args().any(|a| a == SILENT_FLAG);
+
+            let recorder = Arc::new(PhaseRecorder::new());
             app.manage(Arc::clone(&recorder));
             app.manage(Flyout::new());
             app.manage(update::Pending::default());
@@ -195,8 +230,9 @@ pub fn run() {
 
             let tick_handle = handle.clone();
             let sink = Arc::clone(&recorder);
-            app.manage(SensorHub::start(SAMPLE_PERIOD, move |reading| {
-                sink.record(reading);
+            let initial = if silent { IDLE_PERIOD } else { ACTIVE_PERIOD };
+            app.manage(SensorHub::start(initial, move |reading, dt| {
+                sink.record(reading, dt.as_secs_f64());
                 tray::refresh_tooltip(&tick_handle, reading, sink.is_optimized());
             }));
 
@@ -205,7 +241,7 @@ pub fn run() {
             // decocher n'a donc rien a demarrer ni a arreter.
             update::watch(handle.clone());
 
-            if !std::env::args().any(|a| a == SILENT_FLAG) {
+            if !silent {
                 flyout::show(&handle);
             }
 

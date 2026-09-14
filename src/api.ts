@@ -117,6 +117,8 @@ export interface PhasesSnapshot {
 /** Ce que l'interface sait de son propre châssis. */
 export interface UiState {
   pinned: boolean;
+  /** Ouverture au montage : l'interface est chargée même quand le panneau démarre replié. */
+  panelVisible: boolean;
   autostart: boolean;
   /** Mise à jour sans intervention : cochée, l'application se remplace elle-même. */
   autoUpdate: boolean;

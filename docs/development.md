@@ -41,7 +41,7 @@ démode à chaque commit :
 | `core_temp.rs` | décodage validé contre la vraie section partagée |
 | `lhm.rs` | aplatissement de `data.json`, capteurs sans lecture écartés |
 | `libre_hw.rs`, `amd_gpu.rs` | le tri des capteurs : package avant cœurs, une seule carte, rien hors du CPU |
-| `phases.rs` | aiguillage vers la bonne phase, secondes déduites de la période, remise à zéro |
+| `phases.rs` | aiguillage vers la bonne phase, durée juste malgré un changement de cadence, remise à zéro |
 | `tools.rs` | cohérence des états rapportés, développement des `%VAR%`, énumération des processus |
 | `autostart.rs` | la tâche est élevée, silencieuse, liée au logon ; guillemets imbriqués de l'action ; une tâche restée sur un ancien emplacement ne compte pas |
 
@@ -74,11 +74,12 @@ request passera. La protection de `main` exige ce statut, donc rien n'y entre sa
 
 | Constante | Fichier | Valeur | Justification |
 |---|---|---|---|
-| période d'échantillonnage | `lib.rs` | 1000 ms | — |
+| `ACTIVE_PERIOD` | `lib.rs` | 1000 ms | cadence panneau ouvert : c'est le rythme auquel les valeurs s'affichent |
+| `IDLE_PERIOD` | `lib.rs` | 5000 ms | cadence panneau replié — l'état normal. Personne ne lit les valeurs : reste l'infobulle, vue au survol, et les moyennes, indifférentes à la résolution |
 | `REPROBE_EVERY` | `sensors/hub.rs` | 5 cycles | reprise à chaud d'un outil lancé après coup |
 | `TURBO_THRESHOLD_PCT` | `App.tsx` | 105 % | entre ~99 (bridé) et 178 (turbo) — voir measurement.md |
 | `LOAD_FLOOR_PCT` | `App.tsx` | 15 % | en dessous, l'absence de turbo ne prouve rien |
-| `HISTORY` | `App.tsx` | 120 | 2 minutes de courbes à 1 Hz |
+| `HISTORY` | `App.tsx` | 120 | 2 minutes de courbes à 1 Hz ; vidé au repli, faute de quoi la réouverture recollerait deux instants éloignés |
 | `CAPS_MS` | `App.tsx` | 10000 ms | les fournisseurs bougent rarement ; le hub re-sonde de son côté |
 | `POWER_MS` | `App.tsx` | 5000 ms | rattrape un changement de schéma fait depuis Windows |
 | `PHASES_MS` | `App.tsx` | 2000 ms | simple rafraîchissement d'affichage : l'accumulation est côté Rust |

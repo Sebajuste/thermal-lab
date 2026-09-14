@@ -9,7 +9,7 @@ lire.
 ```mermaid
 flowchart TB
     subgraph th["Thread d'échantillonnage — détient COM, WMI et les pilotes"]
-        hub["hub.rs<br/>boucle 1 Hz"]
+        hub["hub.rs<br/>boucle 1 Hz panneau ouvert<br/>0,2 Hz replié"]
         subgraph ext["Sources externes — pilote noyau tiers"]
             ct["core_temp"]
             hw["hwinfo"]
