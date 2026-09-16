@@ -53,25 +53,27 @@ pub struct Profile {
     pub nature: Nature,
 }
 
-/// Ne fixe pas la preference d'energie : elle reste a sa valeur d'origine.
+/// Ne fixe que les deux leviers historiques. La coupure du turbo vaut pour toutes les
+/// classes de coeurs ; le reste garde sa valeur d'origine.
 const CAPPED: Profile = Profile {
     id: ProfileId::Capped,
-    targets: Targets {
-        boost_mode: 0,
-        throttle_max: 99,
-        epp: None,
-    },
+    targets: Targets::cpu(0, 99),
     nature: Nature::Tradeoff,
 };
 
+/// Les memes valeurs sur les deux classes de coeurs. Sur un processeur hybride, poser
+/// seulement la classe 0 ne plafonne que les coeurs E — ceux qu'un jeu sollicite le
+/// moins.
+///
 /// 60 n'est pas une valeur inventee : c'est celle que Windows pose lui-meme dans son
 /// schema Economie d'energie. 80 % est un point de depart, a juger au comparatif.
 const AGGRESSIVE: Profile = Profile {
     id: ProfileId::Aggressive,
     targets: Targets {
-        boost_mode: 0,
-        throttle_max: 80,
         epp: Some(60),
+        throttle_max_1: Some(80),
+        epp_1: Some(60),
+        ..Targets::cpu(0, 80)
     },
     nature: Nature::Tradeoff,
 };
@@ -116,9 +118,13 @@ impl Profile {
     /// Des valeurs relues correspondent a ce profil. Un levier que le profil ne fixe pas
     /// ne compte pas : il est revenu a sa valeur d'origine, quelle qu'elle soit.
     fn matches(&self, read: Targets) -> bool {
-        self.targets.boost_mode == read.boost_mode
-            && self.targets.throttle_max == read.throttle_max
-            && self.targets.epp.is_none_or(|e| read.epp == Some(e))
+        let fits = |want: Option<u32>, got: Option<u32>| want.is_none_or(|w| got == Some(w));
+        let t = self.targets;
+        t.boost_mode == read.boost_mode
+            && t.throttle_max == read.throttle_max
+            && fits(t.epp, read.epp)
+            && fits(t.throttle_max_1, read.throttle_max_1)
+            && fits(t.epp_1, read.epp_1)
     }
 }
 
@@ -147,18 +153,17 @@ mod tests {
     fn no_machine_state_matches_two_profiles() {
         for (i, a) in PROFILES.iter().enumerate() {
             for b in &PROFILES[i + 1..] {
-                let same_cpu = a.targets.boost_mode == b.targets.boost_mode
-                    && a.targets.throttle_max == b.targets.throttle_max;
-                let compatible_epp = match (a.targets.epp, b.targets.epp) {
+                let compatible = |x: Option<u32>, y: Option<u32>| match (x, y) {
                     (Some(x), Some(y)) => x == y,
                     _ => true,
                 };
-                assert!(
-                    !(same_cpu && compatible_epp),
-                    "{:?} et {:?} se confondent",
-                    a.id,
-                    b.id
-                );
+                let (a_, b_) = (a.targets, b.targets);
+                let overlap = a_.boost_mode == b_.boost_mode
+                    && a_.throttle_max == b_.throttle_max
+                    && compatible(a_.epp, b_.epp)
+                    && compatible(a_.throttle_max_1, b_.throttle_max_1)
+                    && compatible(a_.epp_1, b_.epp_1);
+                assert!(!overlap, "{:?} et {:?} se confondent", a.id, b.id);
             }
         }
     }
@@ -169,10 +174,15 @@ mod tests {
     fn every_profile_turns_the_switch_on() {
         use crate::power::PowerState;
         for p in PROFILES {
-            let read = Targets {
-                epp: p.targets.epp.or(Some(33)),
-                ..p.targets
+            // Une machine relue a toutes ses valeurs : les leviers non fixes y ont
+            // celles d'un schema Equilibre.
+            let balanced = Targets {
+                epp: Some(33),
+                throttle_max_1: Some(100),
+                epp_1: Some(33),
+                ..Targets::cpu(2, 100)
             };
+            let read = p.targets.or(balanced);
             let state = PowerState::new("g".into(), "n".into(), read, true);
             assert!(state.optimized, "{:?}", p.id);
             assert_eq!(state.profile, Some(p.id));
@@ -190,28 +200,57 @@ mod tests {
 
     #[test]
     fn identifies_known_targets_and_only_them() {
-        let read = |boost_mode, throttle_max, epp| Targets {
-            boost_mode,
-            throttle_max,
-            epp,
+        // (boost, plafond E, EPP E, plafond P, EPP P)
+        let read = |b, t, e, t1, e1| Targets {
+            boost_mode: b,
+            throttle_max: t,
+            epp: e,
+            throttle_max_1: t1,
+            epp_1: e1,
         };
-        // Le bridage leger ne fixe pas l'EPP : toute valeur lui convient.
-        assert_eq!(identify(read(0, 99, Some(33))), Some(ProfileId::Capped));
-        assert_eq!(identify(read(0, 99, None)), Some(ProfileId::Capped));
-        // Le profil agressif l'exige.
-        assert_eq!(identify(read(0, 80, Some(60))), Some(ProfileId::Aggressive));
-        assert_eq!(identify(read(0, 80, Some(33))), None);
-        assert_eq!(identify(read(0, 80, None)), None);
+        // Le bridage leger ne fixe que les leviers historiques : le reste est libre.
+        let light = read(0, 99, Some(33), Some(100), Some(33));
+        assert_eq!(identify(light), Some(ProfileId::Capped));
+        assert_eq!(
+            identify(read(0, 99, None, None, None)),
+            Some(ProfileId::Capped)
+        );
 
-        assert_eq!(identify(read(2, 100, Some(33))), None);
-        assert_eq!(identify(read(2, 80, Some(33))), None);
+        // Le profil agressif exige ses valeurs sur les deux classes.
+        let aggressive = read(0, 80, Some(60), Some(80), Some(60));
+        assert_eq!(identify(aggressive), Some(ProfileId::Aggressive));
+        assert_eq!(identify(read(0, 80, Some(33), Some(80), Some(60))), None);
+        assert_eq!(identify(read(0, 80, Some(60), None, Some(60))), None);
+
+        assert_eq!(identify(read(2, 100, Some(33), Some(100), Some(33))), None);
+    }
+
+    /// L'etat laisse par la premiere version du profil agressif, qui ne posait que la
+    /// classe 0 : coeurs E plafonnes, coeurs P libres. Ce n'est pas le profil agressif,
+    /// et le relire comme tel masquerait le defaut.
+    #[test]
+    fn half_applied_aggressive_is_not_aggressive() {
+        let half = Targets {
+            epp: Some(60),
+            throttle_max_1: Some(100),
+            epp_1: Some(33),
+            ..Targets::cpu(0, 80)
+        };
+        assert_eq!(identify(half), None);
+        assert!(half.caps_turbo(), "reste un bridage, externe");
+    }
+
+    #[test]
+    fn aggressive_caps_both_core_classes_alike() {
+        let t = get(ProfileId::Aggressive).targets;
+        assert_eq!(t.throttle_max_1, Some(t.throttle_max));
+        assert_eq!(t.epp_1, t.epp);
     }
 
     /// Le bridage d'origine ne change pas en devenant un profil.
     #[test]
     fn the_capped_profile_is_the_historic_cap() {
-        let t = get(ProfileId::Capped).targets;
-        assert_eq!((t.boost_mode, t.throttle_max, t.epp), (0, 99, None));
-        assert!(t.caps_turbo());
+        assert_eq!(get(ProfileId::Capped).targets, Targets::cpu(0, 99));
+        assert!(Targets::cpu(0, 99).caps_turbo());
     }
 }

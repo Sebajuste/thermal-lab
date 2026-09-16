@@ -35,25 +35,48 @@ const FILE: &str = "restore.json";
 /// L'etat du schema avant notre intervention. Le GUID en fait partie : c'est ce
 /// schema-la qu'il faudra remettre en etat, et non celui qui sera actif au moment de
 /// l'arret.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Baseline {
     pub scheme_guid: String,
     pub boost_mode: u32,
     pub throttle_max: u32,
-    /// Absent d'un journal ecrit avant que l'EPP ne soit un levier : cette version-la ne
-    /// l'avait pas touche, il n'y a donc rien a rendre.
+    /// Absents d'un journal ecrit avant que ces leviers existent : la version qui l'a
+    /// ecrit ne les avait pas touches, il n'y a donc rien a rendre.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epp: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throttle_max_1: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epp_1: Option<u32>,
 }
 
 impl Baseline {
     fn of(state: &PowerState) -> Self {
+        Self::with(state.scheme_guid.clone(), state.targets())
+    }
+
+    /// Complete une reference ecrite par une version qui ignorait certains leviers.
+    ///
+    /// Un levier absent du journal n'a jamais ete touche par la version qui l'a ecrit :
+    /// sa valeur actuelle est donc sa valeur d'origine, et elle doit etre retenue avant
+    /// que celle-ci le modifie. Seulement sur le schema de la reference : les valeurs d'un
+    /// autre schema ne diraient rien de celui qu'il faudra rendre.
+    fn completed(&self, state: &PowerState) -> Self {
+        if state.scheme_guid != self.scheme_guid {
+            return self.clone();
+        }
+        Self::with(self.scheme_guid.clone(), self.targets().or(state.targets()))
+    }
+
+    fn with(scheme_guid: String, t: Targets) -> Self {
         Self {
-            scheme_guid: state.scheme_guid.clone(),
-            boost_mode: state.boost_mode,
-            throttle_max: state.throttle_max,
-            epp: state.epp,
+            scheme_guid,
+            boost_mode: t.boost_mode,
+            throttle_max: t.throttle_max,
+            epp: t.epp,
+            throttle_max_1: t.throttle_max_1,
+            epp_1: t.epp_1,
         }
     }
 
@@ -62,6 +85,8 @@ impl Baseline {
             boost_mode: self.boost_mode,
             throttle_max: self.throttle_max,
             epp: self.epp,
+            throttle_max_1: self.throttle_max_1,
+            epp_1: self.epp_1,
         }
     }
 }
@@ -233,16 +258,22 @@ impl<P: PowerControl> Restorer<P> {
                 self.journal.arm(&baseline)?;
                 Some(baseline)
             }
-            Pending::Baseline(baseline) => Some(baseline),
+            Pending::Baseline(baseline) => {
+                let completed = baseline.completed(&state);
+                if completed != baseline {
+                    self.journal.arm(&completed)?;
+                }
+                Some(completed)
+            }
             Pending::Unknown => None,
         };
 
         // Un levier que le profil ne fixe pas revient a sa valeur d'origine. Sans cela,
         // passer d'un profil qui le regle a un profil qui l'ignore le laisserait en place,
         // et la machine ne ressemblerait plus a aucun des deux.
-        let targets = Targets {
-            epp: targets.epp.or(baseline.and_then(|b| b.epp)),
-            ..targets
+        let targets = match baseline {
+            Some(b) => targets.or(b.targets()),
+            None => targets,
         };
 
         // L'ordre compte : le journal est ecrit avant la premiere modification, jamais
@@ -312,12 +343,13 @@ mod tests {
     }
 
     impl FakePower {
-        /// L'EPP d'origine est celle du schema Equilibre.
+        /// Les autres leviers ont leur valeur d'un schema Equilibre.
         fn new(boost_mode: u32, throttle_max: u32) -> Self {
             let targets = Targets {
-                boost_mode,
-                throttle_max,
                 epp: Some(33),
+                throttle_max_1: Some(100),
+                epp_1: Some(33),
+                ..Targets::cpu(boost_mode, throttle_max)
             };
             Self {
                 state: Mutex::new(PowerState::new(
@@ -366,10 +398,7 @@ mod tests {
             let mut state = self.state.lock().unwrap();
             if state.scheme_guid == scheme_guid {
                 // Comme powercfg : un levier absent de l'ecriture n'est pas touche.
-                let targets = Targets {
-                    epp: targets.epp.or(state.epp),
-                    ..targets
-                };
+                let targets = targets.or(state.targets());
                 *state = PowerState::new(
                     state.scheme_guid.clone(),
                     state.scheme_name.clone(),
@@ -415,6 +444,76 @@ mod tests {
             (state.boost_mode, state.throttle_max, state.epp),
             (2, 100, Some(33))
         );
+    }
+
+    /// Le cas reel qui a revele le defaut : un journal arme par la version qui ne
+    /// connaissait pas les coeurs P, puis le profil agressif reapplique par la version
+    /// corrigee. Les coeurs P sont plafonnes pour la premiere fois ; leur valeur d'origine
+    /// doit entrer au journal avant, sans quoi l'arret les laisserait plafonnes.
+    #[test]
+    fn un_journal_ancien_est_complete_avant_de_toucher_un_nouveau_levier() {
+        let journal = temp_journal();
+        std::fs::write(
+            journal.path().unwrap(),
+            format!(r#"{{"schemeGuid":"{SCHEME}","boostMode":2,"throttleMax":100,"epp":33}}"#),
+        )
+        .unwrap();
+        // La machine telle que la premiere version l'a laissee : coeurs E seuls bride.
+        let power = FakePower::new(0, 80);
+        let half = Targets {
+            epp: Some(60),
+            ..Targets::cpu(0, 80)
+        };
+        power.write(SCHEME, half).unwrap();
+        let r = Restorer::new(power, journal);
+
+        let state = r.engage(aggressive()).expect("profil reapplique");
+        assert_eq!((state.throttle_max_1, state.epp_1), (Some(80), Some(60)));
+        match r.journal.pending() {
+            Pending::Baseline(b) => {
+                assert_eq!((b.throttle_max_1, b.epp_1), (Some(100), Some(33)));
+                assert_eq!(b.epp, Some(33), "une valeur deja retenue ne bouge pas");
+            }
+            other => panic!("journal perdu : {other:?}"),
+        }
+
+        let state = r.restore().expect("restauration").expect("etat rendu");
+        assert_eq!((state.throttle_max, state.epp), (100, Some(33)));
+        assert_eq!((state.throttle_max_1, state.epp_1), (Some(100), Some(33)));
+    }
+
+    /// Une reference ne se complete pas avec les valeurs d'un autre schema.
+    #[test]
+    fn une_reference_ne_se_complete_pas_depuis_un_autre_schema() {
+        let journal = temp_journal();
+        std::fs::write(
+            journal.path().unwrap(),
+            format!(r#"{{"schemeGuid":"{OTHER}","boostMode":2,"throttleMax":100}}"#),
+        )
+        .unwrap();
+        let r = Restorer::new(FakePower::new(2, 100), journal);
+
+        r.engage(aggressive()).expect("profil applique");
+        match r.journal.pending() {
+            Pending::Baseline(b) => {
+                assert_eq!(b.scheme_guid, OTHER);
+                assert_eq!((b.epp, b.throttle_max_1, b.epp_1), (None, None, None));
+            }
+            other => panic!("journal perdu : {other:?}"),
+        }
+    }
+
+    /// Sur un processeur hybride, les coeurs P ont leurs propres reglages : le profil les
+    /// pose, et l'arret les rend.
+    #[test]
+    fn le_profil_agressif_plafonne_aussi_les_coeurs_p() {
+        let r = restorer(FakePower::new(2, 100));
+
+        let state = r.engage(aggressive()).expect("profil applique");
+        assert_eq!((state.throttle_max_1, state.epp_1), (Some(80), Some(60)));
+
+        let state = r.restore().expect("restauration").expect("etat rendu");
+        assert_eq!((state.throttle_max_1, state.epp_1), (Some(100), Some(33)));
     }
 
     /// Le levier qu'un profil ne fixe pas revient a sa valeur d'origine, et non a celle
@@ -464,20 +563,23 @@ mod tests {
             format!(r#"{{"schemeGuid":"{SCHEME}","boostMode":2,"throttleMax":100}}"#),
         )
         .unwrap();
-        // Une EPP differente de l'origine : si la restauration l'ecrivait, on le verrait.
+        // Des valeurs differentes de l'origine : si la restauration les ecrivait, on le
+        // verrait.
         let power = FakePower::new(0, 99);
         let moved = Targets {
-            boost_mode: 0,
-            throttle_max: 99,
             epp: Some(70),
+            throttle_max_1: Some(90),
+            epp_1: Some(70),
+            ..Targets::cpu(0, 99)
         };
         power.write(SCHEME, moved).unwrap();
         let r = Restorer::new(power, journal);
 
         let state = r.restore().expect("restauration").expect("etat rendu");
+        assert_eq!((state.boost_mode, state.throttle_max), (2, 100));
         assert_eq!(
-            (state.boost_mode, state.throttle_max, state.epp),
-            (2, 100, Some(70))
+            (state.epp, state.throttle_max_1, state.epp_1),
+            (Some(70), Some(90), Some(70))
         );
     }
 
@@ -740,6 +842,8 @@ mod tests {
             boost_mode: 2,
             throttle_max: 100,
             epp: Some(33),
+            throttle_max_1: Some(100),
+            epp_1: Some(50),
         })
         .expect("serialisable");
 

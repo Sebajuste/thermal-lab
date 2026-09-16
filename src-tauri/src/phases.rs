@@ -397,11 +397,7 @@ mod tests {
             PowerState::new(
                 "guid".into(),
                 "Balanced".into(),
-                Targets {
-                    boost_mode,
-                    throttle_max,
-                    epp: None,
-                },
+                Targets::cpu(boost_mode, throttle_max),
                 true,
             )
         };

@@ -39,34 +39,69 @@ const PROCTHROTTLEMAX: &str = "bc5038f7-23e0-4960-96da-33abaf5935ec";
 /// un processeur sans HWP, mais ecrite quand meme — le schema la garde.
 const PERFEPP: &str = "36687f9e-e3a5-4dbf-b1dc-15eb381c6863";
 
+// Les memes, pour la classe d'efficacite 1 : les coeurs P d'un processeur hybride.
+// Windows les regle a part — PROCTHROTTLEMAX et PERFEPP ne touchent alors que la classe 0,
+// les coeurs E. Releve sur i9-14900K, plafond a 80 % pose sur la seule classe 0 : coeurs
+// E a 59 %, coeurs P a 96 %. Sur un processeur homogene, ils existent et sont ignores.
+const PROCTHROTTLEMAX1: &str = "bc5038f7-23e0-4960-96da-33abaf5935ed";
+const PERFEPP1: &str = "36687f9e-e3a5-4dbf-b1dc-15eb381c6864";
+
 /// Les valeurs des leviers CPU, telles que le schema les porte.
 ///
-/// `epp` est optionnel, et son absence ne dit pas la meme chose selon l'endroit : dans
-/// un etat relu, la valeur n'a pas pu etre lue ; dans un profil, le profil ne fixe pas
-/// ce levier ; dans une ecriture, il n'est pas touche.
+/// Les leviers optionnels n'ont pas la meme absence selon l'endroit : dans un etat relu,
+/// la valeur n'a pas pu etre lue ; dans un profil, le profil ne fixe pas ce levier ; dans
+/// une ecriture, il n'est pas touche.
+///
+/// Le suffixe `_1` designe la classe d'efficacite 1 — les coeurs P d'un processeur
+/// hybride. Sans suffixe, la classe 0 : les coeurs E, ou tous les coeurs ailleurs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Targets {
     pub boost_mode: u32,
     pub throttle_max: u32,
     pub epp: Option<u32>,
+    pub throttle_max_1: Option<u32>,
+    pub epp_1: Option<u32>,
 }
 
 impl Targets {
-    /// Le turbo est interdit, par l'un ou l'autre des deux leviers.
+    /// Les deux leviers historiques seuls, les autres non fixes.
+    pub const fn cpu(boost_mode: u32, throttle_max: u32) -> Self {
+        Self {
+            boost_mode,
+            throttle_max,
+            epp: None,
+            throttle_max_1: None,
+            epp_1: None,
+        }
+    }
+
+    /// Chaque levier optionnel absent d'ici est pris dans `fallback`.
+    pub fn or(self, fallback: Targets) -> Targets {
+        Targets {
+            epp: self.epp.or(fallback.epp),
+            throttle_max_1: self.throttle_max_1.or(fallback.throttle_max_1),
+            epp_1: self.epp_1.or(fallback.epp_1),
+            ..self
+        }
+    }
+
+    /// Le turbo est interdit, ou une classe de coeurs est plafonnee sous son nominal.
     pub fn caps_turbo(self) -> bool {
-        self.boost_mode == 0 || self.throttle_max < 100
+        self.boost_mode == 0
+            || self.throttle_max < 100
+            || self.throttle_max_1.is_some_and(|t| t < 100)
     }
 }
 
 /// Valeurs par defaut de Windows quand la cle n'existe pas dans le schema.
 ///
-/// Pas de defaut pour `epp` : il depend du schema — 33 pour Equilibre, 60 pour
-/// Economie d'energie — et `powercfg /qh` le resout tout seul a la lecture.
+/// Pas de defaut pour l'EPP : elle depend du schema — 33 pour Equilibre, 60 pour
+/// Economie d'energie — et `powercfg /qh` la resout toute seule a la lecture. Le plafond
+/// des coeurs P, lui, vaut 100 partout.
 pub(crate) const WINDOWS_DEFAULTS: Targets = Targets {
-    boost_mode: 2, // aggressive
-    throttle_max: 100,
-    epp: None,
+    throttle_max_1: Some(100),
+    ..Targets::cpu(2 /* aggressive */, 100)
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -78,6 +113,8 @@ pub struct PowerState {
     pub throttle_max: u32,
     /// `None` quand la valeur n'a pas pu etre lue.
     pub epp: Option<u32>,
+    pub throttle_max_1: Option<u32>,
+    pub epp_1: Option<u32>,
     /// Vrai quand le turbo est interdit, ou qu'un de nos profils est applique. C'est
     /// l'etat de l'interrupteur principal, quel que soit ce qui bride.
     pub optimized: bool,
@@ -97,9 +134,21 @@ impl PowerState {
             boost_mode: targets.boost_mode,
             throttle_max: targets.throttle_max,
             epp: targets.epp,
+            throttle_max_1: targets.throttle_max_1,
+            epp_1: targets.epp_1,
             optimized: targets.caps_turbo() || profile.is_some(),
             profile,
             elevated,
+        }
+    }
+
+    pub fn targets(&self) -> Targets {
+        Targets {
+            boost_mode: self.boost_mode,
+            throttle_max: self.throttle_max,
+            epp: self.epp,
+            throttle_max_1: self.throttle_max_1,
+            epp_1: self.epp_1,
         }
     }
 }
@@ -201,16 +250,23 @@ pub(crate) fn is_elevated() -> bool {
     }
 }
 
-/// La preference d'energie effective du schema, en courant alternatif.
+/// La valeur effective d'un reglage du schema, en courant alternatif.
 ///
 /// Pas par le registre : la cle y est absente tant que personne ne l'a ecrite, et la
 /// valeur vient alors des defauts propres a chaque schema — introuvables pour un schema
 /// cree par l'utilisateur. `powercfg /qh` resout les deux cas, reglage masque compris,
-/// pour une vingtaine de millisecondes.
-fn read_epp(guid: &str) -> Option<u32> {
-    powercfg(&["/qh", guid, SUB_PROCESSOR, PERFEPP])
+/// pour une vingtaine de millisecondes par reglage. Le sous-groupe entier en une fois
+/// en coute 800 : un appel par reglage, donc.
+fn read_hidden(guid: &str, setting: &str) -> Option<u32> {
+    powercfg(&["/qh", guid, SUB_PROCESSOR, setting])
         .ok()
         .and_then(|out| ac_index(&out))
+}
+
+/// Ce qu'il faut pour savoir si l'on peut ecrire : un schema lisible, et l'elevation.
+/// Sans relire les leviers, qui coutent trois appels a `powercfg`.
+pub fn access() -> Result<bool, String> {
+    active_scheme().map(|_| is_elevated())
 }
 
 /// La sortie est localisee, mais ses valeurs ne le sont pas : minimum, maximum,
@@ -231,7 +287,9 @@ pub fn state() -> Result<PowerState, String> {
     let targets = Targets {
         boost_mode: read_setting(&guid, PERFBOOSTMODE, WINDOWS_DEFAULTS.boost_mode),
         throttle_max: read_setting(&guid, PROCTHROTTLEMAX, WINDOWS_DEFAULTS.throttle_max),
-        epp: read_epp(&guid),
+        epp: read_hidden(&guid, PERFEPP),
+        throttle_max_1: read_hidden(&guid, PROCTHROTTLEMAX1),
+        epp_1: read_hidden(&guid, PERFEPP1),
     };
     Ok(PowerState::new(guid, name, targets, is_elevated()))
 }
@@ -264,10 +322,15 @@ pub fn write_values(scheme_guid: &str, targets: Targets) -> Result<(), String> {
     ] {
         powercfg(&[verb, scheme_guid, SUB_PROCESSOR, setting, value])?;
     }
-    if let Some(epp) = targets.epp {
-        let epp = epp.to_string();
+    for (setting, value) in [
+        (PERFEPP, targets.epp),
+        (PROCTHROTTLEMAX1, targets.throttle_max_1),
+        (PERFEPP1, targets.epp_1),
+    ] {
+        let Some(value) = value else { continue };
+        let value = value.to_string();
         for verb in ["/setacvalueindex", "/setdcvalueindex"] {
-            powercfg(&[verb, scheme_guid, SUB_PROCESSOR, PERFEPP, &epp])?;
+            powercfg(&[verb, scheme_guid, SUB_PROCESSOR, setting, &value])?;
         }
     }
 
@@ -336,6 +399,7 @@ mod tests {
         let s = state().expect("schema lisible");
         println!("{s:#?}");
         assert!(s.epp.is_some(), "EPP illisible sur cette machine");
+        assert!(s.throttle_max_1.is_some(), "plafond de classe 1 illisible");
     }
 
     #[test]

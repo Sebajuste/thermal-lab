@@ -62,8 +62,8 @@ pub fn collect(hub: &SensorHub) -> Capabilities {
         })
         .collect();
 
-    let (can_control_power, power_blocked_reason) = match power::state() {
-        Ok(s) if s.elevated => (true, None),
+    let (can_control_power, power_blocked_reason) = match power::access() {
+        Ok(true) => (true, None),
         Ok(_) => (
             false,
             Some(

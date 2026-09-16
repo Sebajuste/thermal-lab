@@ -104,6 +104,9 @@ export interface PowerState {
   throttleMax: number;
   /** Préférence d'énergie de Speed Shift ; `null` si illisible. */
   epp: number | null;
+  /** Les mêmes leviers pour la classe 1 : les cœurs P d'un processeur hybride. */
+  throttleMax1: number | null;
+  epp1: number | null;
   /** Quelque chose bride la machine : l'état de l'interrupteur principal. */
   optimized: boolean;
   /** Le profil connu que les valeurs relues désignent ; `null` libre ou bridage tiers. */
@@ -179,6 +182,9 @@ export interface ProfileInfo {
   throttleMax: number;
   /** `null` : le profil ne fixe pas ce levier, il reste à sa valeur d'origine. */
   epp: number | null;
+  /** Classe 1, les cœurs P ; même convention. */
+  throttleMax1: number | null;
+  epp1: number | null;
 }
 
 /** Miroir de `ProfileChoice` : ce qui a été enregistré, et la machine ensuite. */

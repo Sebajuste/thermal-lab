@@ -10,8 +10,14 @@ secteur et en batterie.
 | `PERFBOOSTMODE` | `be337238-0d82-4146-a960-4f3749d470c7` | `2` (agressif) |
 | `PROCTHROTTLEMAX` | `bc5038f7-23e0-4960-96da-33abaf5935ec` | `100` % |
 | `PERFEPP` | `36687f9e-e3a5-4dbf-b1dc-15eb381c6863` | propre au schéma : `33` Équilibré, `60` Économie d'énergie |
+| `PROCTHROTTLEMAX1` | `bc5038f7-23e0-4960-96da-33abaf5935ed` | `100` % |
+| `PERFEPP1` | `36687f9e-e3a5-4dbf-b1dc-15eb381c6864` | propre au schéma : `33` secteur, `50` batterie en Équilibré |
 
 Sous-groupe processeur : `54533251-82be-4824-96c1-47b60b740d00`.
+
+Les deux derniers sont les pendants des précédents pour la **classe d'efficacité 1** —
+voir « Un processeur hybride a deux jeux de réglages ». `PERFBOOSTMODE` n'a pas de
+pendant : la coupure du turbo vaut pour tous les cœurs.
 
 `PERFEPP` est la préférence d'énergie de Speed Shift, de `0` (performance) à `100`
 (économie). Un processeur sans HWP l'ignore ; elle est écrite quand même, le schéma la
@@ -99,10 +105,13 @@ L'interrupteur principal ne connaît que deux gestes : **appliquer un profil**, 
 la machine**. Un profil est une donnée — des cibles nommées, levier par levier — décrite
 dans `profiles.rs`. Le sélecteur, sous l'interrupteur, dit lequel.
 
-| Profil | Libellé | `PERFBOOSTMODE` | `PROCTHROTTLEMAX` | `PERFEPP` |
+| Profil | Libellé | `PERFBOOSTMODE` | plafond, cœurs E et P | EPP, cœurs E et P |
 |---|---|---|---|---|
-| `capped` | Léger | `0` | `99` % | non fixé — valeur d'origine |
-| `aggressive` | Agressif | `0` | `80` % | `60` |
+| `capped` | Léger | `0` | `99` % cœurs E, cœurs P non fixés | non fixée — valeur d'origine |
+| `aggressive` | Agressif | `0` | `80` % partout | `60` partout |
+
+Léger ne touche que les deux leviers historiques : la coupure du turbo suffit à brider
+les cœurs P, dont le plafond reste à sa valeur d'origine.
 
 `capped` est le bridage historique, inchangé. Pour `aggressive`, `60` n'est pas une
 valeur inventée : c'est celle que Windows pose lui-même dans son schéma Économie
@@ -113,7 +122,7 @@ profil retire des performances même quand le turbo n'aurait pas été sollicit�
 interrupteur   allumé → Restorer::engage(profil choisi)    éteint → Restorer::release()
 sélecteur      set_profile → settings.json ; appliqué aussitôt si l'interrupteur est allumé
 profil         { id, cibles, nature }
-leviers        PERFBOOSTMODE, PROCTHROTTLEMAX, PERFEPP
+leviers        PERFBOOSTMODE, PROCTHROTTLEMAX(1), PERFEPP(1)
 ```
 
 **Un levier qu'un profil ne fixe pas revient à sa valeur d'origine**, prise dans le
@@ -143,10 +152,21 @@ alors « bridage externe » plutôt que de ranger ce bridage sous le profil choi
 modification, quel que soit le profil appliqué, et passer d'un profil à un autre ne la
 réécrit pas. Rendre la machine reste un geste unique.
 
-Elle porte désormais l'EPP d'origine. Un journal écrit par une version antérieure n'en a
-pas : il se relit, et sa restauration laisse l'EPP en l'état — cette version-là n'y avait
-pas touché. Seul un journal **illisible** laisse une limite : les défauts de Windows sont
-posés pour le turbo et le plafond, mais l'EPP n'a pas de défaut universel et reste où elle
+Elle porte désormais la valeur d'origine de chaque levier. Un journal écrit par une
+version antérieure n'en a qu'une partie, et il reste valable : un levier absent n'a jamais
+été touché par la version qui a écrit le journal.
+
+Deux conséquences, toutes deux codées :
+
+- **à la restauration**, un levier absent du journal n'est pas écrit — il n'y a rien à
+  rendre ;
+- **avant d'écrire** un levier absent du journal, sa valeur actuelle y est ajoutée : c'est
+  encore sa valeur d'origine, et c'est le dernier moment où on la connaît. Sans cela, une
+  mise à jour qui apprend un nouveau levier en cours d'intervention le modifierait sans
+  pouvoir le rendre. Le complément ne se fait que sur le schéma de la référence.
+
+Seul un journal **illisible** laisse une limite : les défauts de Windows sont posés pour
+le turbo et les deux plafonds, mais l'EPP n'a pas de défaut universel et reste où elle
 est.
 
 **Chaque profil déclare sa nature** : un arbitrage retire des performances, une
@@ -155,6 +175,32 @@ dans les deux cas — voir [measurement.md](measurement.md). Aucun profil actuel
 de la seconde ; la variante existe pour les leviers GPU à venir.
 
 ## Pièges rencontrés
+
+### Un processeur hybride a deux jeux de réglages
+
+Sur un processeur à cœurs P et E, Windows règle le plafond et l'EPP **par classe
+d'efficacité**. `PROCTHROTTLEMAX` et `PERFEPP` ne portent alors que sur la classe 0, les
+cœurs E ; la classe 1, les cœurs P, a `PROCTHROTTLEMAX1` et `PERFEPP1`.
+
+La première version du profil Agressif ne posait que la classe 0. Relevé sur i9-14900K,
+Cyberpunk 2077 en cours, plafond à 80 % :
+
+| Classe | Processeurs logiques | Réglage appliqué | Fréquence max |
+|---|---|---|---|
+| 1 — cœurs P | 0 à 15 | `100` % | **96 %** |
+| 0 — cœurs E | 16 à 31 | `80` % | **59 %** |
+
+Un jeu tourne sur les cœurs P : le profil y valait exactement Léger. Seule trace visible,
+un peu plus de dents de scie — les cœurs E plafonnés, et tirés vers l'économie par l'EPP.
+
+Deux leçons. Un réglage appliqué ne prouve pas son effet : c'est la fréquence par cœur qui
+le dit, pas le registre. Et l'état ainsi laissé n'est pas « Agressif » : la reconnaissance
+d'un profil exige ses valeurs sur les deux classes, faute de quoi le panneau l'annonce
+comme un bridage externe — ce qu'il est.
+
+La classe d'un processeur logique se lit par `GetSystemCpuSetInformation`,
+champ `EfficiencyClass`. Sur un processeur homogène, tous les cœurs sont de classe 0 et
+les réglages de classe 1 existent sans effet.
 
 ### Le test d'élévation
 
