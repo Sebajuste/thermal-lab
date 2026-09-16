@@ -81,6 +81,42 @@ Trois conséquences à garder en tête :
 Une seconde pression sur l'interrupteur n'écrase pas la référence : elle date de la
 première intervention, sinon l'état bridé s'enregistrerait comme état d'origine.
 
+## Les profils
+
+L'interrupteur principal ne connaît que deux gestes : **appliquer un profil**, ou **rendre
+la machine**. Un profil est une donnée — des cibles nommées, levier par levier — décrite
+dans `profiles.rs`. Le bridage historique en est le premier : `capped`, `0` / `99`.
+
+```
+interrupteur   allumé → Restorer::engage(profil)     éteint → Restorer::release()
+profil         { id, cibles, nature }
+leviers        PERFBOOSTMODE, PROCTHROTTLEMAX
+```
+
+**Le profil actif ne se mémorise pas, il se relit.** Le registre rend des valeurs, pas un
+nom : `PowerState` compare ces valeurs aux profils connus et en déduit `profile`. Trois
+cas, et le troisième n'est pas une erreur :
+
+| Valeurs relues | `optimized` | `profile` | Phase |
+|---|---|---|---|
+| défauts de Windows, ou toute valeur sans bridage | faux | `null` | libre |
+| exactement celles d'un profil | vrai | ce profil | ce profil |
+| un bridage qu'aucun profil ne décrit | vrai | `null` | personnalisée |
+
+Mémoriser le profil choisi dans `settings.json` et l'afficher comme état ferait mentir
+l'interface dès qu'un outil tiers passe derrière — voir « Le schéma actif change sous les
+pieds ». L'intention de l'utilisateur, elle, est une préférence de l'application : elle
+aura sa place dans les réglages le jour où plusieurs profils seront proposés.
+
+**La garantie d'arrêt ne dépend pas du profil.** La référence est prise avant la première
+modification, quel que soit le profil appliqué, et passer d'un profil à un autre ne la
+réécrit pas. Rendre la machine reste un geste unique.
+
+**Chaque profil déclare sa nature** : un arbitrage retire des performances, une
+suppression de gaspillage n'en retire pas. La comparaison de phases n'a pas le même sens
+dans les deux cas — voir [measurement.md](measurement.md). Aucun profil actuel ne relève
+de la seconde ; la variante existe pour les leviers GPU à venir.
+
 ## Pièges rencontrés
 
 ### Le test d'élévation

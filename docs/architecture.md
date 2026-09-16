@@ -49,9 +49,10 @@ celui du frontend. Voir [background-ux.md](background-ux.md).
 | `capabilities.rs` | ce que la machine permet, et pourquoi pas le reste |
 | `tray.rs` | l'icône de la zone de notification : état, infobulle, menu |
 | `flyout.rs` | le panneau : ancrage sur l'icône, masquage, épinglage |
-| `phases.rs` | les moyennes par état du bridage, tenues au rythme de la mesure |
+| `phases.rs` | les moyennes par phase — libre, un profil, ou bridage inconnu — tenues au rythme de la mesure |
 | `tools.rs` | les outils tiers : où ils sont, s'ils tournent, comment les lancer |
 | `power.rs` | lecture registre + écriture `powercfg` du schéma actif |
+| `profiles.rs` | les profils d'optimisation : des cibles nommées, et le profil que des valeurs désignent |
 | `restore.rs` | la garantie d'arrêt : journal des valeurs d'avant, et restauration |
 | `sensors/metric.rs` | les grandeurs mesurables, et le relevé agrégé |
 | `sensors/provider.rs` | le contrat que respecte toute source |

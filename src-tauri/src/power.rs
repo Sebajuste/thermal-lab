@@ -11,7 +11,9 @@
 //! Lecture par le registre, car `powercfg /query` n'affiche rien pour ces reglages quand
 //! leur attribut est masque. Ecriture par `powercfg`, qui gere la propagation au systeme.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+use crate::profiles::{self, ProfileId};
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -29,13 +31,26 @@ const SUB_PROCESSOR: &str = "54533251-82be-4824-96c1-47b60b740d00";
 const PERFBOOSTMODE: &str = "be337238-0d82-4146-a960-4f3749d470c7";
 const PROCTHROTTLEMAX: &str = "bc5038f7-23e0-4960-96da-33abaf5935ec";
 
-/// Valeurs par defaut de Windows quand la cle n'existe pas dans le schema.
-pub(crate) const DEFAULT_BOOST_MODE: u32 = 2; // aggressive
-pub(crate) const DEFAULT_THROTTLE_MAX: u32 = 100;
+/// Les valeurs des leviers CPU, telles que le schema les porte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Targets {
+    pub boost_mode: u32,
+    pub throttle_max: u32,
+}
 
-/// Valeurs du bridage : turbo interdit par l'un et l'autre levier.
-pub(crate) const CAPPED_BOOST_MODE: u32 = 0;
-pub(crate) const CAPPED_THROTTLE_MAX: u32 = 99;
+impl Targets {
+    /// Le turbo est interdit, par l'un ou l'autre des deux leviers.
+    pub fn caps_turbo(self) -> bool {
+        self.boost_mode == 0 || self.throttle_max < 100
+    }
+}
+
+/// Valeurs par defaut de Windows quand la cle n'existe pas dans le schema.
+pub(crate) const WINDOWS_DEFAULTS: Targets = Targets {
+    boost_mode: 2, // aggressive
+    throttle_max: 100,
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,8 +60,27 @@ pub struct PowerState {
     pub boost_mode: u32,
     pub throttle_max: u32,
     /// Vrai quand le turbo est effectivement interdit, par l'un ou l'autre des deux leviers.
+    /// C'est l'etat de l'interrupteur principal, quel que soit le profil qui bride.
     pub optimized: bool,
+    /// Le profil connu dont les valeurs sont exactement celles-ci. `None` pour une machine
+    /// rendue, et pour un bridage qu'aucun profil ne decrit — pose par un outil tiers.
+    pub profile: Option<ProfileId>,
     pub elevated: bool,
+}
+
+impl PowerState {
+    /// Tout ce qui se deduit des valeurs est deduit ici, et nulle part ailleurs.
+    pub fn new(scheme_guid: String, scheme_name: String, targets: Targets, elevated: bool) -> Self {
+        Self {
+            scheme_guid,
+            scheme_name,
+            boost_mode: targets.boost_mode,
+            throttle_max: targets.throttle_max,
+            optimized: targets.caps_turbo(),
+            profile: profiles::identify(targets),
+            elevated,
+        }
+    }
 }
 
 /// Extrait le premier GUID canonique d'une chaine, sans dependre de la langue de Windows.
@@ -148,20 +182,14 @@ pub(crate) fn is_elevated() -> bool {
 
 pub fn state() -> Result<PowerState, String> {
     let (guid, name) = active_scheme()?;
-    let boost_mode = read_setting(&guid, PERFBOOSTMODE, DEFAULT_BOOST_MODE);
-    let throttle_max = read_setting(&guid, PROCTHROTTLEMAX, DEFAULT_THROTTLE_MAX);
-
-    Ok(PowerState {
-        optimized: boost_mode == 0 || throttle_max < 100,
-        scheme_guid: guid,
-        scheme_name: name,
-        boost_mode,
-        throttle_max,
-        elevated: is_elevated(),
-    })
+    let targets = Targets {
+        boost_mode: read_setting(&guid, PERFBOOSTMODE, WINDOWS_DEFAULTS.boost_mode),
+        throttle_max: read_setting(&guid, PROCTHROTTLEMAX, WINDOWS_DEFAULTS.throttle_max),
+    };
+    Ok(PowerState::new(guid, name, targets, is_elevated()))
 }
 
-/// Pose deux valeurs sur un schema donne, et les applique.
+/// Pose des valeurs sur un schema donne, et les applique.
 ///
 /// Le schema vise est passe en parametre plutot que relu : une restauration doit
 /// remettre en etat le schema qu'on a modifie, meme si Windows en a active un autre
@@ -169,7 +197,7 @@ pub fn state() -> Result<PowerState, String> {
 ///
 /// On ecrit les valeurs secteur *et* batterie : sur une tour la seconde ne sert a rien,
 /// mais laisser les deux coherentes evite un comportement different sur onduleur.
-pub fn write_values(scheme_guid: &str, boost_mode: u32, throttle_max: u32) -> Result<(), String> {
+pub fn write_values(scheme_guid: &str, targets: Targets) -> Result<(), String> {
     if !is_elevated() {
         return Err(crate::t!(
             "administrator rights are required to change the power scheme",
@@ -178,8 +206,8 @@ pub fn write_values(scheme_guid: &str, boost_mode: u32, throttle_max: u32) -> Re
         .to_string());
     }
 
-    let boost = boost_mode.to_string();
-    let throttle = throttle_max.to_string();
+    let boost = targets.boost_mode.to_string();
+    let throttle = targets.throttle_max.to_string();
 
     for (verb, value, setting) in [
         ("/setacvalueindex", &boost, PERFBOOSTMODE),

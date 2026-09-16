@@ -90,13 +90,25 @@ export interface Capabilities {
   powerBlockedReason: string | null;
 }
 
+/** Miroir de `profiles::ProfileId`. */
+export type ProfileId = "capped";
+
+/** Le profil que l'interrupteur applique — miroir de `profiles::DEFAULT`. */
+export const DEFAULT_PROFILE: ProfileId = "capped";
+
+/** Miroir de `profiles::Nature` : un arbitrage, ou une suppression de gaspillage. */
+export type Nature = "tradeoff" | "waste";
+
 /** Miroir de `power::PowerState`. */
 export interface PowerState {
   schemeGuid: string;
   schemeName: string;
   boostMode: number;
   throttleMax: number;
+  /** Quelque chose bride la machine : l'état de l'interrupteur principal. */
   optimized: boolean;
+  /** Le profil connu que les valeurs relues désignent ; `null` libre ou bridage tiers. */
+  profile: ProfileId | null;
   elevated: boolean;
 }
 
@@ -123,11 +135,26 @@ export interface PhaseSnapshot {
   seconds: number;
 }
 
+/** Miroir de `phases::PhaseKey` : la référence, un profil, ou un bridage inconnu. */
+export type PhaseKey = "free" | "custom" | ProfileId;
+
+/** Miroir de `phases::PhaseEntry`. */
+export interface PhaseEntry extends PhaseSnapshot {
+  key: PhaseKey;
+  /** `null` pour la phase libre, qui est la référence. */
+  nature: Nature | null;
+}
+
 /** Miroir de `phases::PhasesSnapshot`. */
 export interface PhasesSnapshot {
-  optimized: PhaseSnapshot;
-  free: PhaseSnapshot;
+  /** La phase qu'alimentent les relevés en ce moment. */
+  current: PhaseKey;
+  /** La phase libre et chaque profil, toujours ; la personnalisée si elle a existé. */
+  phases: PhaseEntry[];
 }
+
+export const phaseOf = (p: PhasesSnapshot | null, key: PhaseKey): PhaseEntry | undefined =>
+  p?.phases.find((e) => e.key === key);
 
 /** Ce que l'interface sait de son propre châssis. */
 export interface UiState {

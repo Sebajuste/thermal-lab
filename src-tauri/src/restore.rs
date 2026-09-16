@@ -27,10 +27,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::power::{
-    self, PowerState, CAPPED_BOOST_MODE, CAPPED_THROTTLE_MAX, DEFAULT_BOOST_MODE,
-    DEFAULT_THROTTLE_MAX,
-};
+use crate::power::{self, PowerState, Targets, WINDOWS_DEFAULTS};
+use crate::profiles::Profile;
 
 const FILE: &str = "restore.json";
 
@@ -51,6 +49,13 @@ impl Baseline {
             scheme_guid: state.scheme_guid.clone(),
             boost_mode: state.boost_mode,
             throttle_max: state.throttle_max,
+        }
+    }
+
+    fn targets(&self) -> Targets {
+        Targets {
+            boost_mode: self.boost_mode,
+            throttle_max: self.throttle_max,
         }
     }
 }
@@ -141,7 +146,7 @@ impl Journal {
 /// jouer contre le vrai `powercfg` de la machine qui compile.
 pub trait PowerControl {
     fn state(&self) -> Result<PowerState, String>;
-    fn write(&self, scheme_guid: &str, boost_mode: u32, throttle_max: u32) -> Result<(), String>;
+    fn write(&self, scheme_guid: &str, targets: Targets) -> Result<(), String>;
 }
 
 /// Le vrai schema, celui de Windows.
@@ -152,8 +157,8 @@ impl PowerControl for SystemPower {
         power::state()
     }
 
-    fn write(&self, scheme_guid: &str, boost_mode: u32, throttle_max: u32) -> Result<(), String> {
-        power::write_values(scheme_guid, boost_mode, throttle_max)
+    fn write(&self, scheme_guid: &str, targets: Targets) -> Result<(), String> {
+        power::write_values(scheme_guid, targets)
     }
 }
 
@@ -175,15 +180,18 @@ impl<P: PowerControl> Restorer<P> {
         }
     }
 
-    /// Bascule le bridage. `false` ne pose pas les valeurs inverses au hasard : il rend
-    /// la machine, exactement comme le fait l'arret.
-    pub fn set_optimized(&self, on: bool) -> Result<PowerState, String> {
+    /// Applique un profil. La reference est prise avant la premiere modification, et un
+    /// changement de profil en cours de route ne la touche pas.
+    pub fn engage(&self, profile: &Profile) -> Result<PowerState, String> {
         let _ops = self.lock();
-        if on {
-            self.cap()
-        } else {
-            self.release()
-        }
+        self.cap(profile.targets)
+    }
+
+    /// Rend la machine. Ne pose pas des valeurs « libres » au hasard : fait exactement
+    /// ce que fait l'arret.
+    pub fn release(&self) -> Result<PowerState, String> {
+        let _ops = self.lock();
+        self.release_inner()
     }
 
     /// Rend la machine si nous lui devons quelque chose. `Ok(None)` quand il n'y a rien
@@ -201,7 +209,7 @@ impl<P: PowerControl> Restorer<P> {
         self.ops.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn cap(&self) -> Result<PowerState, String> {
+    fn cap(&self, targets: Targets) -> Result<PowerState, String> {
         let state = self.power.state()?;
         if !state.elevated {
             return Err(crate::t!(
@@ -220,39 +228,33 @@ impl<P: PowerControl> Restorer<P> {
         // L'ordre compte : le journal est ecrit avant la premiere modification, jamais
         // apres. Entre les deux, le pire cas est une dette sans intervention — une
         // restauration qui ne change rien.
-        self.power
-            .write(&state.scheme_guid, CAPPED_BOOST_MODE, CAPPED_THROTTLE_MAX)?;
+        self.power.write(&state.scheme_guid, targets)?;
         self.power.state()
     }
 
-    fn release(&self) -> Result<PowerState, String> {
+    fn release_inner(&self) -> Result<PowerState, String> {
         match self.restore_inner()? {
             Some(state) => Ok(state),
             // Rien d'arme : le bridage vient d'ailleurs. On pose les defauts de Windows,
             // seule reference dont on dispose.
             None => {
                 let state = self.power.state()?;
-                self.power
-                    .write(&state.scheme_guid, DEFAULT_BOOST_MODE, DEFAULT_THROTTLE_MAX)?;
+                self.power.write(&state.scheme_guid, WINDOWS_DEFAULTS)?;
                 self.power.state()
             }
         }
     }
 
     fn restore_inner(&self) -> Result<Option<PowerState>, String> {
-        let (guid, boost, throttle) = match self.journal.pending() {
+        let (guid, targets) = match self.journal.pending() {
             Pending::None => return Ok(None),
-            Pending::Baseline(b) => (b.scheme_guid, b.boost_mode, b.throttle_max),
-            Pending::Unknown => (
-                self.power.state()?.scheme_guid,
-                DEFAULT_BOOST_MODE,
-                DEFAULT_THROTTLE_MAX,
-            ),
+            Pending::Baseline(b) => (b.scheme_guid.clone(), b.targets()),
+            Pending::Unknown => (self.power.state()?.scheme_guid, WINDOWS_DEFAULTS),
         };
 
         // Le `?` laisse volontairement le journal en place : une restauration ratee reste
         // due, et sera retentee au prochain lancement.
-        self.power.write(&guid, boost, throttle)?;
+        self.power.write(&guid, targets)?;
         self.journal.clear();
         self.power.state().map(Some)
     }
@@ -261,6 +263,7 @@ impl<P: PowerControl> Restorer<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profiles::{self, ProfileId};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
 
@@ -290,15 +293,17 @@ mod tests {
 
     impl FakePower {
         fn new(boost_mode: u32, throttle_max: u32) -> Self {
+            let targets = Targets {
+                boost_mode,
+                throttle_max,
+            };
             Self {
-                state: Mutex::new(PowerState {
-                    scheme_guid: SCHEME.into(),
-                    scheme_name: "Balanced".into(),
-                    boost_mode,
-                    throttle_max,
-                    optimized: boost_mode == 0 || throttle_max < 100,
-                    elevated: true,
-                }),
+                state: Mutex::new(PowerState::new(
+                    SCHEME.into(),
+                    "Balanced".into(),
+                    targets,
+                    true,
+                )),
                 writes: Mutex::new(Vec::new()),
                 fails: Mutex::new(false),
             }
@@ -327,19 +332,23 @@ mod tests {
             Ok(self.state.lock().unwrap().clone())
         }
 
-        fn write(&self, scheme_guid: &str, boost: u32, throttle: u32) -> Result<(), String> {
+        fn write(&self, scheme_guid: &str, targets: Targets) -> Result<(), String> {
             if *self.fails.lock().unwrap() {
                 return Err("powercfg a echoue".into());
             }
-            self.writes
-                .lock()
-                .unwrap()
-                .push((scheme_guid.into(), boost, throttle));
+            self.writes.lock().unwrap().push((
+                scheme_guid.into(),
+                targets.boost_mode,
+                targets.throttle_max,
+            ));
             let mut state = self.state.lock().unwrap();
             if state.scheme_guid == scheme_guid {
-                state.boost_mode = boost;
-                state.throttle_max = throttle;
-                state.optimized = boost == 0 || throttle < 100;
+                *state = PowerState::new(
+                    state.scheme_guid.clone(),
+                    state.scheme_name.clone(),
+                    targets,
+                    state.elevated,
+                );
             }
             Ok(())
         }
@@ -349,13 +358,17 @@ mod tests {
         Restorer::new(power, temp_journal())
     }
 
+    fn capped() -> &'static Profile {
+        profiles::get(ProfileId::Capped)
+    }
+
     // --- La reference est prise avant l'intervention, jamais apres ---
 
     #[test]
     fn arme_le_journal_avant_de_brider() {
         let r = restorer(FakePower::new(2, 100));
 
-        let state = r.set_optimized(true).expect("bridage applique");
+        let state = r.engage(capped()).expect("bridage applique");
 
         assert!(state.optimized);
         assert_eq!(r.power.writes(), vec![(SCHEME.to_string(), 0, 99)]);
@@ -372,8 +385,8 @@ mod tests {
     fn n_ecrase_pas_la_reference_en_bridant_deux_fois() {
         let r = restorer(FakePower::new(2, 100));
 
-        r.set_optimized(true).expect("premier bridage");
-        r.set_optimized(true).expect("second bridage");
+        r.engage(capped()).expect("premier bridage");
+        r.engage(capped()).expect("second bridage");
 
         match r.journal.pending() {
             Pending::Baseline(b) => assert_eq!((b.boost_mode, b.throttle_max), (2, 100)),
@@ -386,7 +399,7 @@ mod tests {
     #[test]
     fn restaure_les_valeurs_d_origine_a_l_arret() {
         let r = restorer(FakePower::new(2, 100));
-        r.set_optimized(true).expect("bridage applique");
+        r.engage(capped()).expect("bridage applique");
 
         let state = r.restore().expect("restauration").expect("etat rendu");
 
@@ -404,7 +417,7 @@ mod tests {
     fn restaure_un_etat_deja_bride_avant_l_intervention() {
         let r = restorer(FakePower::new(0, 99));
 
-        r.set_optimized(true).expect("bridage applique");
+        r.engage(capped()).expect("bridage applique");
         let state = r.restore().expect("restauration").expect("etat rendu");
 
         assert_eq!((state.boost_mode, state.throttle_max), (0, 99));
@@ -415,7 +428,7 @@ mod tests {
     #[test]
     fn restaure_le_schema_d_origine_meme_si_l_actif_a_change() {
         let r = restorer(FakePower::new(2, 100));
-        r.set_optimized(true).expect("bridage applique");
+        r.engage(capped()).expect("bridage applique");
 
         r.power.switch_active_scheme(OTHER);
         r.restore().expect("restauration");
@@ -441,7 +454,7 @@ mod tests {
     fn le_journal_survit_a_la_mort_du_process() {
         let journal = temp_journal();
         let first = Restorer::new(FakePower::new(2, 100), journal.clone());
-        first.set_optimized(true).expect("bridage applique");
+        first.engage(capped()).expect("bridage applique");
         drop(first); // aucune restauration : le process disparait
 
         let next = Restorer::new(FakePower::new(0, 99), journal);
@@ -473,7 +486,7 @@ mod tests {
         let r = restorer(FakePower::new(2, 100));
         r.power.fails(true);
 
-        assert!(r.set_optimized(true).is_err());
+        assert!(r.engage(capped()).is_err());
         assert!(
             matches!(r.journal.pending(), Pending::Baseline(_)),
             "une ecriture partielle resterait sans dette"
@@ -483,7 +496,7 @@ mod tests {
     #[test]
     fn une_restauration_qui_echoue_garde_le_journal() {
         let r = restorer(FakePower::new(2, 100));
-        r.set_optimized(true).expect("bridage applique");
+        r.engage(capped()).expect("bridage applique");
         r.power.fails(true);
 
         assert!(r.restore().is_err());
@@ -500,7 +513,7 @@ mod tests {
     fn refuse_de_brider_sans_journal_possible() {
         let r = Restorer::new(FakePower::new(2, 100), Journal::nowhere());
 
-        assert!(r.set_optimized(true).is_err());
+        assert!(r.engage(capped()).is_err());
         assert!(
             r.power.writes().is_empty(),
             "bride sans filet de restauration"
@@ -511,9 +524,32 @@ mod tests {
     fn sans_elevation_rien_n_est_arme_ni_ecrit() {
         let r = restorer(FakePower::new(2, 100).without_elevation());
 
-        assert!(r.set_optimized(true).is_err());
+        assert!(r.engage(capped()).is_err());
         assert!(r.power.writes().is_empty());
         assert!(matches!(r.journal.pending(), Pending::None));
+    }
+
+    /// L'etat relu dit quel profil est applique : c'est ce que l'interface affiche, et
+    /// il vient de la machine, pas d'un souvenir de l'application.
+    #[test]
+    fn l_etat_relu_nomme_le_profil_applique() {
+        let r = restorer(FakePower::new(2, 100));
+        assert_eq!(r.power.state().unwrap().profile, None);
+
+        let state = r.engage(capped()).expect("bridage applique");
+        assert_eq!(state.profile, Some(ProfileId::Capped));
+
+        let state = r.release().expect("relachement");
+        assert_eq!(state.profile, None);
+    }
+
+    /// Un bridage pose par un autre outil n'est pas un de nos profils : il reste bride,
+    /// mais sans nom.
+    #[test]
+    fn un_bridage_tiers_n_a_pas_de_profil() {
+        let state = FakePower::new(2, 80).state().unwrap();
+        assert!(state.optimized);
+        assert_eq!(state.profile, None);
     }
 
     /// Relacher a la main ce qu'un autre outil a bride : rien n'est arme, on pose les
@@ -522,7 +558,7 @@ mod tests {
     fn relacher_sans_journal_pose_les_defauts() {
         let r = restorer(FakePower::new(0, 99));
 
-        let state = r.set_optimized(false).expect("relachement");
+        let state = r.release().expect("relachement");
 
         assert_eq!((state.boost_mode, state.throttle_max), (2, 100));
         assert_eq!(r.power.writes(), vec![(SCHEME.to_string(), 2, 100)]);
@@ -551,7 +587,7 @@ mod tests {
             assert_eq!(etats(&app.power), origine);
 
             // L'utilisateur bride.
-            app.set_optimized(true).unwrap();
+            app.engage(capped()).unwrap();
             assert_eq!(etats(&app.power), (0, 99));
             println!("[{cause}] bride    : {:?}", etats(&app.power));
 

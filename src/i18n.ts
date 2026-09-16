@@ -63,6 +63,7 @@ const en = {
   compareHint: "Compare under a steady load.",
   resetAverages: "Reset the averages",
   phaseCapped: "Capped",
+  phaseCustom: "Custom",
   phaseFree: "Free",
   deltaHint: "Capped minus free",
 
@@ -161,6 +162,7 @@ const fr: Strings = {
   compareHint: "Comparer sous charge stable.",
   resetAverages: "Réinitialiser les moyennes",
   phaseCapped: "Bridé",
+  phaseCustom: "Personnalisé",
   phaseFree: "Libre",
   deltaHint: "Bridé moins libre",
 

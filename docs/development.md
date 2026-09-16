@@ -43,7 +43,8 @@ démode à chaque commit :
 | `core_temp.rs` | décodage validé contre la vraie section partagée |
 | `lhm.rs` | aplatissement de `data.json`, capteurs sans lecture écartés |
 | `libre_hw.rs`, `amd_gpu.rs` | le tri des capteurs : package avant cœurs, une seule carte, rien hors du CPU |
-| `phases.rs` | aiguillage vers la bonne phase, durée juste malgré un changement de cadence, remise à zéro |
+| `phases.rs` | aiguillage vers la bonne phase, bridage tiers tenu à part, durée juste malgré un changement de cadence, clés sérialisées sans collision, remise à zéro |
+| `profiles.rs` | chaque profil désigné par son identifiant, cibles distinctes et jamais égales à une machine rendue, bridage d'origine inchangé |
 | `tools.rs` | cohérence des états rapportés, développement des `%VAR%`, énumération des processus |
 | `autostart.rs` | la tâche est élevée, silencieuse, liée au logon ; guillemets imbriqués de l'action ; une tâche restée sur un ancien emplacement ne compte pas |
 

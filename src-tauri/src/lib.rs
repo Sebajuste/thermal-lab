@@ -4,6 +4,7 @@ mod flyout;
 mod i18n;
 mod phases;
 mod power;
+mod profiles;
 mod restore;
 mod settings;
 mod tools;
@@ -21,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 use capabilities::Capabilities;
 use flyout::Flyout;
-use phases::{PhaseRecorder, PhasesSnapshot};
+use phases::{PhaseKey, PhaseRecorder, PhasesSnapshot};
 use power::PowerState;
 use restore::{Journal, Restorer, SystemPower};
 use sensors::{Reading, SensorHub};
@@ -159,10 +160,17 @@ fn set_auto_update(app: AppHandle, on: bool) -> Result<bool, String> {
     Ok(app.state::<Settings>().set_auto_update(on)?.auto_update)
 }
 
-/// Bascule le bridage, puis remet tout le monde d'accord : accumulateur de phases,
-/// icone, menu, et interface si elle est ouverte.
+/// Bascule l'interrupteur principal, puis remet tout le monde d'accord : accumulateur de
+/// phases, icone, menu, et interface si elle est ouverte.
+///
+/// Allume, il applique le profil par defaut ; eteint, il rend la machine.
 pub(crate) fn apply_optimization(app: &AppHandle, on: bool) -> Result<PowerState, String> {
-    let state = app.state::<PowerGuard>().set_optimized(on)?;
+    let guard = app.state::<PowerGuard>();
+    let state = if on {
+        guard.engage(profiles::get(profiles::DEFAULT))?
+    } else {
+        guard.release()?
+    };
     sync_power(app, &state);
     Ok(state)
 }
@@ -183,7 +191,7 @@ fn restore_machine(app: &AppHandle) {
 
 fn sync_power(app: &AppHandle, state: &PowerState) {
     app.state::<Arc<PhaseRecorder>>()
-        .set_optimized(state.optimized);
+        .set_phase(PhaseKey::of(state));
     tray::set_optimized(app, state.optimized);
     tray::set_can_toggle(app, state.elevated);
     let _ = app.emit("power-changed", state);
@@ -261,7 +269,7 @@ pub fn run() {
             let initial = power::state().ok();
             let optimized = initial.as_ref().is_some_and(|s| s.optimized);
             let elevated = initial.as_ref().is_some_and(|s| s.elevated);
-            recorder.set_optimized(optimized);
+            recorder.set_phase(initial.as_ref().map_or(PhaseKey::Free, PhaseKey::of));
 
             tray::build(&handle, optimized, elevated)?;
 
@@ -270,7 +278,7 @@ pub fn run() {
             let initial = if silent { IDLE_PERIOD } else { ACTIVE_PERIOD };
             app.manage(SensorHub::start(initial, move |reading, dt| {
                 sink.record(reading, dt.as_secs_f64());
-                tray::refresh_tooltip(&tick_handle, reading, sink.is_optimized());
+                tray::refresh_tooltip(&tick_handle, reading, sink.is_capped());
             }));
 
             // La veille des mises a jour tourne quoi qu'il arrive : c'est elle qui lit

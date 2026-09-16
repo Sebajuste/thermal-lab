@@ -227,7 +227,10 @@ température explique le CPU, la puissance explique les degrés ambiants.
 
 ## Comparaison de phases
 
-`phases.ts` accumule des moyennes séparées selon l'état du bridage. La comparaison n'a de
+`phases.rs` accumule des moyennes séparées par phase : la machine libre, chaque profil,
+et un bridage qu'aucun profil ne décrit — posé par un outil tiers — qui ne se mêle pas
+aux moyennes d'un profil. La phase se lit dans l'état relu du schéma, jamais dans
+l'intention de l'utilisateur. La comparaison n'a de
 sens qu'**à charge comparable** : basculer pendant un écran de chargement ou un menu
 fausse les moyennes. Basculer en jeu, sur une scène stable.
 
