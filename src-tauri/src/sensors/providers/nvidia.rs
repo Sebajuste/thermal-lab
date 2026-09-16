@@ -137,3 +137,27 @@ impl Provider for NvidiaProvider {
         Sampled::Answered
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nvml_wrapper::enum_wrappers::device::PerformanceState;
+
+    /// Lit la carte reelle, sans rien ecrire : les etats de performance qu'elle declare,
+    /// et la plage d'horloge de chacun. C'est ce que le bridage au repos vise.
+    /// `cargo test pstate_clock_ranges -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pstate_clock_ranges() {
+        let nvml = Nvml::init().expect("NVML");
+        let gpu = nvml.device_by_index(0).expect("carte 0");
+        println!("carte : {:?}", gpu.name());
+        println!("etat  : {:?}", gpu.performance_state());
+        let states = gpu.supported_performance_states().expect("etats");
+        for p in states.iter().filter(|p| **p != PerformanceState::Unknown) {
+            let g = gpu.min_max_clock_of_pstate(Clock::Graphics, *p);
+            let m = gpu.min_max_clock_of_pstate(Clock::Memory, *p);
+            println!("P{:<2} graphique {:?}  memoire {:?}", p.as_c(), g, m);
+        }
+    }
+}

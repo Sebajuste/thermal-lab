@@ -29,6 +29,9 @@ pub struct Prefs {
     /// Le profil que l'interrupteur appliquera. Une intention, pas un etat : le profil
     /// reellement applique se relit dans le schema d'alimentation.
     pub profile: ProfileId,
+    /// Brider la carte graphique quand elle consomme sans rien produire. Faux par
+    /// defaut : c'est une ecriture dans le pilote graphique, et elle se demande.
+    pub gpu_idle_clamp: bool,
 }
 
 pub struct Settings {
@@ -84,6 +87,19 @@ impl Settings {
         Ok(next)
     }
 
+    /// Meme contrat que les autres : la reponse est ce qui a ete ecrit.
+    pub fn set_gpu_idle_clamp(&self, on: bool) -> Result<Prefs, String> {
+        let next = {
+            let mut prefs = self.prefs.lock().map_err(|_| {
+                crate::t!("settings unusable", "réglages inutilisables").to_string()
+            })?;
+            prefs.gpu_idle_clamp = on;
+            *prefs
+        };
+        self.save(&next)?;
+        Ok(next)
+    }
+
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
         let Some(path) = self.path.as_ref() else {
             return Err(crate::t!(
@@ -117,6 +133,10 @@ mod tests {
         let prefs: Prefs = serde_json::from_str("{}").expect("objet vide accepte");
         assert!(!prefs.auto_update);
         assert_eq!(prefs.profile, crate::profiles::DEFAULT);
+        assert!(
+            !prefs.gpu_idle_clamp,
+            "une ecriture dans le pilote se demande"
+        );
     }
 
     #[test]
@@ -124,6 +144,7 @@ mod tests {
         let prefs = Prefs {
             auto_update: true,
             profile: ProfileId::Aggressive,
+            gpu_idle_clamp: true,
         };
         let raw = serde_json::to_string(&prefs).expect("serialisable");
         assert!(raw.contains("autoUpdate"), "{raw}");

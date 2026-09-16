@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import {
   checkUpdate,
   chooseProfile,
+  readGpuClamp,
+  setGpuClamp,
   hideWindow,
   providerOf,
   quitApp,
@@ -18,6 +20,7 @@ import {
   setPinned,
   val,
   type Capabilities,
+  type GpuClampStatus,
   type GpuHolder,
   type MetricKey,
   type PhasesSnapshot,
@@ -218,6 +221,7 @@ export default function App() {
   const [autoUpdate, setAutoUpdateState] = useState(false);
   const [profile, setProfileState] = useState<ProfileId>("capped");
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
+  const [gpuClamp, setGpuClampState] = useState<GpuClampStatus | null>(null);
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   // La bascule passe par une tâche planifiée, donc par une invite UAC : le temps que
@@ -283,6 +287,18 @@ export default function App() {
   // panneau replié, il ne coûte rien tant que rien ne change.
   useEffect(() => {
     const off = listen<PowerState>("power-changed", (e) => setPower(e.payload));
+    return () => void off.then((f) => f());
+  }, []);
+
+  // Le bridage GPU se décide sur le thread de mesure, panneau replié compris : on lit
+  // son état au montage, puis on écoute ses changements.
+  useEffect(() => {
+    void readGpuClamp()
+      .then(setGpuClampState)
+      .catch(() => {});
+    const off = listen<GpuClampStatus>("gpu-clamp-changed", (e) =>
+      setGpuClampState(e.payload),
+    );
     return () => void off.then((f) => f());
   }, []);
 
@@ -453,6 +469,15 @@ export default function App() {
     }
   }, [autoUpdate]);
 
+  const toggleGpuClamp = useCallback(async () => {
+    setError(null);
+    try {
+      setGpuClampState(await setGpuClamp(!(gpuClamp?.enabled ?? false)));
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [gpuClamp]);
+
   const reset = useCallback(() => {
     void resetPhases().then(() => readPhases().then(setPhases));
     setHistory([]);
@@ -495,7 +520,10 @@ export default function App() {
   // Les couleurs gardent le sens qu'elles ont pour le CPU : « hot » l'état coûteux,
   // « cool » l'état économe, « idle » celui où la mesure ne permet pas de conclure. Une
   // carte qui affiche coûte, mais légitimement : rien à conclure sur un gaspillage.
-  const gpuBadge: Badge | null = gpuAnomaly
+  const gpuClamped = gpuClamp?.clamped === true;
+  const gpuBadge: Badge | null = gpuClamped
+    ? { text: t.badgeGpuClamped, kind: "cool" }
+    : gpuAnomaly
     ? { text: t.badgeGpuPinned, kind: "hot" }
     : gpuView === "rest"
       ? { text: t.badgeIdle, kind: "cool" }
@@ -528,8 +556,11 @@ export default function App() {
 
   // Épinglée, la cause remplace la fréquence : c'est ce que l'utilisateur doit lire, et
   // la fréquence n'est pas toujours une mesure sur les cartes concernées.
-  const gpuPowerNote =
-    gpuView === "software" && holders.length > 0
+  // Bridée, la carte redescend par notre fait : le verdict n'a plus de sens, et c'est le
+  // bridage qu'il faut lire.
+  const gpuPowerNote = gpuClamped
+    ? t.gpuClampedNote
+    : gpuView === "software" && holders.length > 0
       ? t.gpuHeldBy(holderLabel(holders[0]), Math.max(0, holderCount - 1))
       : gpuView === "policy"
         ? t.gpuNoClient
@@ -565,6 +596,26 @@ export default function App() {
               onChanged={refreshCaps}
               onError={setError}
             />
+
+            <section className="panel">
+              <h2>{t.graphicsCard}</h2>
+              <label className="check" title={t.gpuClampHint}>
+                <input
+                  type="checkbox"
+                  checked={gpuClamp?.enabled ?? false}
+                  disabled={gpuClamp === null}
+                  onChange={() => void toggleGpuClamp()}
+                />
+                <span>{t.gpuClampOption}</span>
+              </label>
+              {gpuClamp?.enabled && (
+                <p className={gpuClamp.unsupported || gpuClamp.error ? "hint hint-line" : "hint"}>
+                  {gpuClamp.unsupported ??
+                    gpuClamp.error ??
+                    (gpuClamp.clamped ? t.gpuClampActive : t.gpuClampWaiting)}
+                </p>
+              )}
+            </section>
 
             <section className="panel">
               <h2>{t.application}</h2>

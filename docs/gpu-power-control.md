@@ -1,11 +1,11 @@
 # Le GPU : lire son repos, agir sur sa consommation
 
-> **Statut : diagnostic implémenté, aucun actionneur.** Le badge du GPU applique
-> l'algorithme de décision ci-dessous ; ce qui en reste à faire est tenu à jour en fin de
-> section. Ce document prépare l'extension de l'application au côté GPU, sur le
-> modèle de [power-control.md](power-control.md) pour le CPU. Les relevés en fin de
-> document sont mesurés ; les mécanismes proposés sont à vérifier sur machine avant d'être
-> codés.
+> **Statut : diagnostic implémenté ; un actionneur, le verrou d'horloge au repos,
+> implémenté et désactivé par défaut.** Le badge du GPU applique l'algorithme de décision
+> ci-dessous ; ce qui en reste à faire est tenu à jour en fin de section. Les autres
+> actionneurs restent des recommandations. Les relevés en fin de document sont mesurés ;
+> le verrou n'a pas encore été vu à l'œuvre sur la machine de référence — voir « Le
+> bridage au repos ».
 
 Le point de départ est un cas réel, relevé sur le portable de contrepoint décrit dans
 [measurement.md](measurement.md) : une RTX 2000 Ada qui consomme 18 W en continu, sans
@@ -223,10 +223,13 @@ les cartes concernées la fréquence n'est pas toujours une mesure.
 | Étapes ① à ⑥ | ✅ |
 | Détection de capteur figé | ✅ sur la fréquence affichée |
 | Règle « quand interroger NVML » | ❌ suspendue au test de l'effet observateur |
+| Verrou d'horloge au repos | ✅ désactivé par défaut — voir § 3 |
+| Préférence GPU par application, NVAPI | ❌ |
 | Drapeaux d'événement secondaires, `GpuPowerLimitW` | ❌ |
 
 Le code : `gpuVerdict` dans `App.tsx` pour l'algorithme, `sensors/providers/gpu_holders.rs`
-pour ⑤. `cargo test gpu_holders -- --ignored --nocapture` liste les clients de la machine
+pour ⑤, `gpu_clamp.rs` pour le verrou — qui reprend l'énoncé du verdict côté Rust, parce
+qu'il doit agir panneau replié, quand l'interface ne tourne pas. `cargo test gpu_holders -- --ignored --nocapture` liste les clients de la machine
 courante.
 
 ## À lire en plus
@@ -306,8 +309,60 @@ référence, les *locked clocks* sont supportées depuis Turing sur une bonne pa
 cartes. Les deux appels échouent proprement en `NVML_ERROR_NOT_SUPPORTED` ailleurs — donc
 capacité à **sonder à l'exécution**, jamais à déduire du nom de la carte.
 
-C'est l'actionneur qui se prête au même traitement que le bridage CPU : un interrupteur de
-politique, deux moyennes de phase, et la mesure qui dit ce que ça coûte.
+#### Le bridage au repos — implémenté
+
+`gpu_clamp.rs`, option « Brider le GPU quand il consomme pour rien » de l'onglet Système,
+**décochée par défaut** : c'est une écriture dans le pilote graphique.
+
+**La cible n'est pas codée en dur.** La carte déclare ses états de performance et la plage
+d'horloge de chacun (`nvmlDeviceGetMinMaxClockOfPState`) ; le verrou vise l'état le plus
+reposé qu'elle déclare. Relevé sur la machine de développement :
+
+| État | Graphique | Mémoire |
+|---|---|---|
+| P0 | 210 – 3105 MHz | 11 501 MHz |
+| P3 | 210 – 3105 MHz | 5 001 MHz |
+| **P8** | **210 – 405 MHz** | **405 MHz** |
+
+Le verrou mémoire n'existe que depuis Ampere : refusé, le verrou graphique reste seul.
+
+**Quand.** Le même énoncé que le badge : pilote qui déclare la carte inoccupée, aucun
+écran attaché, état de performance élevé, charge nulle — y compris celle du décodeur et de
+l'encodeur. Trois relevés concordants avant de verrouiller ; **un seul** signe de travail
+pour relâcher. Verrouillée, la carte redescend par notre fait : son état de performance
+n'est plus consulté, seuls comptent la charge, le pilote et l'écran.
+
+Une carte qui affiche n'est jamais touchée : verrouiller la mémoire d'une carte qui balaie
+une dalle ferait des artefacts, et la clause d'affichage l'exclut de toute façon.
+
+**Délai de relâchement.** La décision suit la mesure : une seconde panneau ouvert, cinq
+replié. C'est le retard maximal au lancement d'un jeu, couvert par n'importe quel écran de
+chargement.
+
+**Garantie d'arrêt.** Même principe que pour le CPU : `gpu-clamp.json`, dans le dossier de
+configuration, est écrit avant le verrou et retiré après. La sortie relâche ; un arrêt
+brutal est soldé au lancement suivant, avant la première mesure. Sans journal possible,
+pas de verrou. Les verrous tombent aussi d'eux-mêmes au redémarrage du pilote.
+
+**Refus.** `NotSupported` ou `NoPermission` arrêtent les tentatives et s'affichent sous la
+case ; la recocher les efface. Un autre échec est retenté au relevé suivant.
+
+**Non vérifié sur la machine de référence.** Le verrou ne se déclenche que sans écran
+attaché : sur la machine de développement il ne s'arme jamais. Deux inconnues restent :
+
+- si le pilote de la RTX 2000 Ada accepte le verrou, ou répond `NotSupported` — la case le
+  dira ;
+- si le verrou fait baisser **la puissance** — seule mesure qui compte, `clocks.sm` étant
+  figé sur cette carte. La carte « Puis. GPU » le montrera, et le badge passe à « bridé ».
+
+Le chemin d'écriture se vérifie à part, dans une console élevée et sans jeu en cours :
+
+```
+cargo test verrouille_et_relache_la_vraie_carte -- --ignored --nocapture
+```
+
+`cargo test pstate_clock_ranges -- --ignored --nocapture` liste, sans rien écrire, les
+états et plages de la carte courante.
 
 ### 4. Désactiver le périphérique PnP — l'option nucléaire
 

@@ -54,6 +54,7 @@ celui du frontend. Voir [background-ux.md](background-ux.md).
 | `power.rs` | lecture registre + écriture `powercfg` du schéma actif |
 | `profiles.rs` | les profils d'optimisation : des cibles nommées, et le profil que des valeurs désignent |
 | `restore.rs` | la garantie d'arrêt : journal des valeurs d'avant, et restauration |
+| `gpu_clamp.rs` | le verrou d'horloge d'une carte qui consomme pour rien : quand le poser, quand le lever, et son journal |
 | `sensors/metric.rs` | les grandeurs mesurables, et le relevé agrégé |
 | `sensors/provider.rs` | le contrat que respecte toute source |
 | `sensors/registry.rs` | quels fournisseurs, dans quel ordre de priorité |

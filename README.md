@@ -21,6 +21,8 @@ instead of taking someone's word for it.
 - One switch to cap the CPU on your active power plan, with a choice of profile:
   *Light* turns the turbo off, *Aggressive* also caps the clock and leans Speed Shift
   toward saving power
+- An opt-in cap for a graphics card that draws power while doing nothing — no display,
+  no load, yet stuck in a performance state. Released at the first sign of work
 - A compare tab that averages each state separately — flip mid-game, read the difference
   at the same workload
 - Lives in the notification area; left-click the icon for the panel, right-click for the

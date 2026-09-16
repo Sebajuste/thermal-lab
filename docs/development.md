@@ -37,6 +37,7 @@ démode à chaque commit :
 | `registry.rs` | identifiants uniques, tout externe a une URL, ordre de priorité |
 | `hub.rs` | le cycle d'une source : retentée au bon moment, lue dès qu'elle apparaît, perdue dès qu'elle se tait |
 | `power.rs` | parsing du GUID et de l'index secteur de `powercfg /qh`, en français et en anglais, rejet des chaînes malformées ; `cargo test reads_the_real_scheme -- --ignored --nocapture` lit le schéma réel sans rien écrire |
+| `gpu_clamp.rs` | verrou après trois relevés concordants et jamais sur une carte qui affiche, relâché au premier signe de travail — décodage vidéo compris —, journal posé avant le verrou et soldé au lancement suivant, refus qui arrête les tentatives jusqu'à la case recochée ; `cargo test verrouille_et_relache_la_vraie_carte -- --ignored --nocapture` **écrit dans le pilote**, console élevée |
 | `restore.rs` | la garantie d'arrêt : référence prise avant l'intervention et jamais réécrite — seulement complétée d'un levier qu'elle ignorait, avant qu'on le touche —, restauration du bon schéma, journal qui survit au process, échec qui laisse la dette, refus de brider sans journal |
 | `shared_memory.rs` | décodage des chaînes C, absence de section non fatale |
 | `hwinfo.rs` | dispositions mémoire — `size_of` 320 et 48, alignement du `__time64_t` |

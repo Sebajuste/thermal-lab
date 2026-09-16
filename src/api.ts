@@ -223,6 +223,22 @@ export const setAutostart = (on: boolean) => invoke<boolean>("set_autostart", { 
 /** Rend l'état réellement enregistré : une écriture refusée décoche la case. */
 export const setAutoUpdate = (on: boolean) => invoke<boolean>("set_auto_update", { on });
 
+/** Miroir de `gpu_clamp::ClampStatus`. */
+export interface GpuClampStatus {
+  /** L'utilisateur l'a demandé. */
+  enabled: boolean;
+  /** Un verrou d'horloge est en place en ce moment. */
+  clamped: boolean;
+  /** Pourquoi il ne sera pas posé, tant que l'option n'est pas recochée. */
+  unsupported: string | null;
+  error: string | null;
+}
+
+export const readGpuClamp = () => invoke<GpuClampStatus>("gpu_clamp_state");
+
+/** Rend l'état du bridage : décocher relâche sur-le-champ. */
+export const setGpuClamp = (on: boolean) => invoke<GpuClampStatus>("set_gpu_clamp", { on });
+
 /** Enregistre le profil, et l'applique aussitôt si l'interrupteur est allumé. */
 export const chooseProfile = (id: ProfileId) => invoke<ProfileChoice>("set_profile", { id });
 

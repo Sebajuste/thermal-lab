@@ -99,6 +99,14 @@ const en = {
 
   // Réglages de l'application
   application: "Application",
+  graphicsCard: "Graphics card",
+  gpuClampOption: "Cap the GPU when it draws power for nothing",
+  gpuClampHint:
+    "When the driver reports the card idle, no display is attached and it still holds a performance state, its clocks are locked to its own idle range. Released at the first sign of work, and on exit.",
+  gpuClampActive: "Capped to its idle state right now.",
+  gpuClampWaiting: "Watching: nothing to cap at the moment.",
+  badgeGpuClamped: "capped",
+  gpuClampedNote: "capped to idle by Thermal Lab",
   autostart: "Start with Windows, as administrator",
   autostartHint:
     "Scheduled task, run as administrator. Elevation is asked once. It targets this executable: moving it clears the box, ticking it again records the new location.",
@@ -203,6 +211,14 @@ const fr: Strings = {
   notMeasured: "Non mesuré ici :",
 
   application: "Application",
+  graphicsCard: "Carte graphique",
+  gpuClampOption: "Brider le GPU quand il consomme pour rien",
+  gpuClampHint:
+    "Quand le pilote déclare la carte inoccupée, qu'aucun écran ne lui est attaché et qu'elle se tient pourtant dans un état de performance, ses horloges sont verrouillées sur sa propre plage de repos. Relâché au premier signe de travail, et à la sortie.",
+  gpuClampActive: "Bridée à son état de repos en ce moment.",
+  gpuClampWaiting: "En veille : rien à brider pour l'instant.",
+  badgeGpuClamped: "bridé",
+  gpuClampedNote: "bridé au repos par Thermal Lab",
   autostart: "Démarrer avec Windows, en administrateur",
   autostartHint:
     "Tâche planifiée, exécutée en administrateur. Élévation demandée une fois. Elle vise cet exécutable : le déplacer décoche la case, la recocher inscrit le nouvel emplacement.",

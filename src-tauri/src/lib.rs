@@ -1,6 +1,7 @@
 mod autostart;
 mod capabilities;
 mod flyout;
+mod gpu_clamp;
 mod i18n;
 mod phases;
 mod power;
@@ -22,6 +23,7 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 use capabilities::Capabilities;
 use flyout::Flyout;
+use gpu_clamp::{ClampJournal, ClampStatus, GpuClamp};
 use phases::{PhaseKey, PhaseRecorder, PhasesSnapshot};
 use power::PowerState;
 use profiles::{ProfileId, ProfileInfo};
@@ -177,6 +179,22 @@ fn set_auto_update(app: AppHandle, on: bool) -> Result<bool, String> {
     Ok(app.state::<Settings>().set_auto_update(on)?.auto_update)
 }
 
+#[tauri::command]
+fn gpu_clamp_state(clamp: tauri::State<'_, Arc<GpuClamp>>) -> ClampStatus {
+    clamp.status()
+}
+
+/// Enregistre la preference, puis l'applique : decocher relache sur-le-champ. La reponse
+/// est l'etat du bridage, pas la demande.
+#[tauri::command]
+fn set_gpu_clamp(app: AppHandle, on: bool) -> Result<ClampStatus, String> {
+    let saved = app
+        .state::<Settings>()
+        .set_gpu_idle_clamp(on)?
+        .gpu_idle_clamp;
+    Ok(app.state::<Arc<GpuClamp>>().set_enabled(saved))
+}
+
 /// Enregistre le profil choisi, et l'applique aussitot si l'interrupteur est allume :
 /// changer de profil en cours de route ne doit pas demander d'eteindre puis de rallumer.
 ///
@@ -309,12 +327,31 @@ pub fn run() {
 
             tray::build(&handle, optimized, elevated)?;
 
+            // Le bridage GPU suit la mesure, pas le panneau : c'est replie que la carte
+            // gaspille, et que personne ne regarde. Un verrou laisse par un arret brutal
+            // est solde avant la premiere mesure.
+            let clamp_journal = match handle.path().app_config_dir() {
+                Ok(dir) => ClampJournal::in_dir(&dir),
+                Err(_) => ClampJournal::nowhere(),
+            };
+            let enabled = app.state::<Settings>().prefs().gpu_idle_clamp;
+            let clamp = Arc::new(GpuClamp::new(
+                gpu_clamp::NvmlWriter::default(),
+                clamp_journal,
+                enabled,
+            ));
+            clamp.restore_at_startup();
+            app.manage(Arc::clone(&clamp));
+
             let tick_handle = handle.clone();
             let sink = Arc::clone(&recorder);
             let initial = if silent { IDLE_PERIOD } else { ACTIVE_PERIOD };
             app.manage(SensorHub::start(initial, move |reading, dt| {
                 sink.record(reading, dt.as_secs_f64());
                 tray::refresh_tooltip(&tick_handle, reading, sink.is_capped());
+                if clamp.on_reading(reading) {
+                    let _ = tick_handle.emit("gpu-clamp-changed", clamp.status());
+                }
             }));
 
             // La veille des mises a jour tourne quoi qu'il arrive : c'est elle qui lit
@@ -357,6 +394,8 @@ pub fn run() {
             set_autostart,
             set_auto_update,
             set_profile,
+            gpu_clamp_state,
+            set_gpu_clamp,
             update::check_update,
             update::install_update
         ])
@@ -370,6 +409,9 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 restore_machine(app);
+                if let Some(clamp) = app.try_state::<Arc<GpuClamp>>() {
+                    clamp.shutdown();
+                }
             }
         });
 }
