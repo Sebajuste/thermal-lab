@@ -142,6 +142,10 @@ pub fn show(app: &AppHandle) {
     let _ = win.unminimize();
     let _ = win.show();
     let _ = win.set_focus();
+
+    // Quelqu'un regarde : on remonte la cadence de mesure, et le hub publie un releve
+    // frais sans attendre la fin du sommeil en cours.
+    crate::set_sampling(app, true);
 }
 
 /// Saisit la fenetre pour la deplacer.
@@ -157,10 +161,17 @@ pub fn start_drag(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("deplacement impossible : {e}"))
 }
 
+pub fn is_visible(app: &AppHandle) -> bool {
+    window(app)
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+}
+
 pub fn hide(app: &AppHandle) {
     if let Some(win) = window(app) {
         let _ = win.hide();
     }
+    crate::set_sampling(app, false);
 }
 
 /// Clic gauche sur l'icone : ouvre ou referme.
@@ -174,10 +185,7 @@ pub fn toggle(app: &AppHandle, anchor: Option<Anchor>) {
         return;
     }
 
-    let visible = window(app)
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-    if visible {
+    if is_visible(app) {
         hide(app);
     } else {
         show(app);

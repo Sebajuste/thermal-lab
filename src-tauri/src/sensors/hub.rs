@@ -4,9 +4,9 @@
 //! cela ne traverse les threads. Les commandes Tauri se contentent de lire le dernier
 //! releve publie.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -18,6 +18,60 @@ use super::wmi_context::WmiContext;
 /// Nombre de cycles entre deux tentatives sur un fournisseur non etabli. Permet de
 /// brancher un outil a chaud sans redemarrer l'application.
 const REPROBE_EVERY: u32 = 5;
+
+/// Plafond applique a l'intervalle reellement ecoule, en multiples de la periode.
+/// Une mise en veille de la machine suspend le thread sans rien mesurer : la reprise
+/// crediterait la phase en cours de toutes les heures passees hors tension.
+const MAX_ELAPSED_FACTOR: u32 = 2;
+
+/// La periode d'echantillonnage, reglable en cours de route et interruptible.
+///
+/// Le `Condvar` compte autant que le `Mutex` : sans lui, passer de cinq secondes a une
+/// seconde n'aurait d'effet qu'au terme du sommeil en cours. Le panneau s'ouvrirait sur
+/// un releve vieux de cinq secondes, et le raccourcissement de la cadence se verrait
+/// avec un cycle de retard.
+struct Cadence {
+    period: Mutex<Duration>,
+    wake: Condvar,
+}
+
+impl Cadence {
+    fn new(period: Duration) -> Self {
+        Self {
+            period: Mutex::new(period),
+            wake: Condvar::new(),
+        }
+    }
+
+    fn get(&self) -> Duration {
+        *self.period.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Regle la periode et reveille le thread pour qu'il mesure tout de suite. Une
+    /// valeur inchangee ne reveille rien : rappeler la cadence active a chaque clic sur
+    /// une icone deja ouverte ne doit pas se transformer en boucle de mesure libre.
+    fn set(&self, period: Duration) {
+        let mut slot = self.period.lock().unwrap_or_else(|e| e.into_inner());
+        if *slot == period {
+            return;
+        }
+        *slot = period;
+        drop(slot);
+        self.wake.notify_all();
+    }
+
+    /// Attend la prochaine echeance, ou le prochain changement de cadence.
+    ///
+    /// La periode est relue ici, sous le verrou, et non recue en argument : un
+    /// changement survenu pendant la mesure notifie un thread qui n'attend pas encore.
+    /// Le reveil serait perdu, et le cycle dormirait l'ancienne duree — cinq secondes
+    /// alors que le panneau vient de s'ouvrir.
+    fn sleep(&self) {
+        let slot = self.period.lock().unwrap_or_else(|e| e.into_inner());
+        let period = *slot;
+        let _ = self.wake.wait_timeout(slot, period);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +85,7 @@ pub struct ProviderStatus {
 pub struct SensorHub {
     latest: Arc<Mutex<Reading>>,
     statuses: Arc<Mutex<Vec<ProviderStatus>>>,
+    cadence: Arc<Cadence>,
 }
 
 fn now_ms() -> u64 {
@@ -42,22 +97,29 @@ fn now_ms() -> u64 {
 
 impl SensorHub {
     /// `on_reading` est appele sur le thread d'echantillonnage, a chaque cycle, avec le
-    /// releve qui vient d'etre publie. C'est le seul point d'accroche du pipeline vers
-    /// l'exterieur : il permet d'accumuler ou de notifier au rythme de la mesure, sans
-    /// dependre de la presence d'une interface.
+    /// releve qui vient d'etre publie et le temps reellement ecoule depuis le precedent.
+    /// C'est le seul point d'accroche du pipeline vers l'exterieur : il permet
+    /// d'accumuler ou de notifier au rythme de la mesure, sans dependre de la presence
+    /// d'une interface.
+    ///
+    /// Ce delai est mesure et non deduit de la periode : celle-ci change en cours de
+    /// route, et un accumulateur qui compterait des ticks au lieu de secondes annoncerait
+    /// des durees fausses des le premier changement de cadence.
     pub fn start<F>(period: Duration, on_reading: F) -> Self
     where
-        F: Fn(&Reading) + Send + 'static,
+        F: Fn(&Reading, Duration) + Send + 'static,
     {
         let latest = Arc::new(Mutex::new(Reading::default()));
         let statuses = Arc::new(Mutex::new(Vec::new()));
+        let cadence = Arc::new(Cadence::new(period));
 
         let reading_sink = Arc::clone(&latest);
         let status_sink = Arc::clone(&statuses);
+        let ticker = Arc::clone(&cadence);
 
         thread::spawn(move || {
             // L'echec de COM n'est pas fatal : les fournisseurs qui n'en dependent pas
-            // (memoire partagee, nvidia-smi) restent operationnels.
+            // (memoire partagee, NVML) restent operationnels.
             let wmi = WmiContext::new().ok();
             let ctx = ProbeContext { wmi: wmi.as_ref() };
 
@@ -66,8 +128,10 @@ impl SensorHub {
             publish_statuses(&status_sink, &providers, &states);
 
             let mut tick: u32 = 0;
+            let mut last = Instant::now();
             loop {
                 tick = tick.wrapping_add(1);
+                let period = ticker.get();
                 let retry = tick.is_multiple_of(REPROBE_EVERY);
                 let mut changed = false;
 
@@ -77,7 +141,11 @@ impl SensorHub {
                 }
                 reading.ts_ms = now_ms();
 
-                on_reading(&reading);
+                let now = Instant::now();
+                let elapsed = (now - last).min(period * MAX_ELAPSED_FACTOR);
+                last = now;
+
+                on_reading(&reading, elapsed);
                 if let Ok(mut slot) = reading_sink.lock() {
                     *slot = reading;
                 }
@@ -85,11 +153,21 @@ impl SensorHub {
                     publish_statuses(&status_sink, &providers, &states);
                 }
 
-                thread::sleep(period);
+                ticker.sleep();
             }
         });
 
-        Self { latest, statuses }
+        Self {
+            latest,
+            statuses,
+            cadence,
+        }
+    }
+
+    /// Change la cadence d'echantillonnage. Le thread se reveille aussitot : la nouvelle
+    /// periode s'applique au releve suivant, pas au sommeil deja engage.
+    pub fn set_period(&self, period: Duration) {
+        self.cadence.set(period);
     }
 
     pub fn latest(&self) -> Reading {

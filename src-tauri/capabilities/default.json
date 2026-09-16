@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Le strict necessaire : ecouter les evenements pousses par Rust. Tout le reste du panneau passe par des commandes de l'application, qui n'ont pas besoin de permission.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

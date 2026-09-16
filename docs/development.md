@@ -11,10 +11,12 @@ plateforme.
 ```bash
 npm install
 npm run tauri:dev      # application en développement, rechargement à chaud
-npm run tauri:build    # binaire + installateur
+npm run tauri:exe      # binaire release seul, sans installateur ni clef de signature
+npm run tauri:build    # binaire + installateur — exige la clef de signature
 npm run build          # frontend seul : tsc puis vite build
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture   # voir les relevés réels
+powershell -File scripts/check-restore.ps1   # état réel de la machine + journal de restauration
 ```
 
 **Lancer depuis un terminal élevé** pour que l'interrupteur de bridage soit actif. Sans
@@ -34,13 +36,16 @@ démode à chaque commit :
 | `metric.rs` | la règle d'arbitrage : premier servi, rejet des non-finis, un échec laisse la place |
 | `registry.rs` | identifiants uniques, tout externe a une URL, ordre de priorité |
 | `hub.rs` | le cycle d'une source : retentée au bon moment, lue dès qu'elle apparaît, perdue dès qu'elle se tait |
-| `power.rs` | parsing du GUID en français et en anglais, rejet des chaînes malformées |
+| `power.rs` | parsing du GUID et de l'index secteur de `powercfg /qh`, en français et en anglais, rejet des chaînes malformées ; `cargo test reads_the_real_scheme -- --ignored --nocapture` lit le schéma réel sans rien écrire |
+| `gpu_clamp.rs` | verrou après trois relevés concordants et jamais sur une carte qui affiche, relâché au premier signe de travail — décodage vidéo compris —, journal posé avant le verrou et soldé au lancement suivant, refus qui arrête les tentatives jusqu'à la case recochée ; `cargo test verrouille_et_relache_la_vraie_carte -- --ignored --nocapture` **écrit dans le pilote**, console élevée |
+| `restore.rs` | la garantie d'arrêt : référence prise avant l'intervention et jamais réécrite — seulement complétée d'un levier qu'elle ignorait, avant qu'on le touche —, restauration du bon schéma, journal qui survit au process, échec qui laisse la dette, refus de brider sans journal |
 | `shared_memory.rs` | décodage des chaînes C, absence de section non fatale |
 | `hwinfo.rs` | dispositions mémoire — `size_of` 320 et 48, alignement du `__time64_t` |
 | `core_temp.rs` | décodage validé contre la vraie section partagée |
 | `lhm.rs` | aplatissement de `data.json`, capteurs sans lecture écartés |
 | `libre_hw.rs`, `amd_gpu.rs` | le tri des capteurs : package avant cœurs, une seule carte, rien hors du CPU |
-| `phases.rs` | aiguillage vers la bonne phase, secondes déduites de la période, remise à zéro |
+| `phases.rs` | aiguillage vers la bonne phase, bridage tiers tenu à part, durée juste malgré un changement de cadence, clés sérialisées sans collision, remise à zéro |
+| `profiles.rs` | chaque profil désigné par son identifiant, aucun état de machine qui satisfasse deux profils, aucun qui ressemble à une machine rendue, interrupteur allumé pour chacun, bridage d'origine inchangé, Agressif identique sur les deux classes de cœurs et non reconnu à moitié appliqué |
 | `tools.rs` | cohérence des états rapportés, développement des `%VAR%`, énumération des processus |
 | `autostart.rs` | la tâche est élevée, silencieuse, liée au logon ; guillemets imbriqués de l'action ; une tâche restée sur un ancien emplacement ne compte pas |
 
@@ -73,11 +78,12 @@ request passera. La protection de `main` exige ce statut, donc rien n'y entre sa
 
 | Constante | Fichier | Valeur | Justification |
 |---|---|---|---|
-| période d'échantillonnage | `lib.rs` | 1000 ms | — |
+| `ACTIVE_PERIOD` | `lib.rs` | 1000 ms | cadence panneau ouvert : c'est le rythme auquel les valeurs s'affichent |
+| `IDLE_PERIOD` | `lib.rs` | 5000 ms | cadence panneau replié — l'état normal. Personne ne lit les valeurs : reste l'infobulle, vue au survol, et les moyennes, indifférentes à la résolution |
 | `REPROBE_EVERY` | `sensors/hub.rs` | 5 cycles | reprise à chaud d'un outil lancé après coup |
 | `TURBO_THRESHOLD_PCT` | `App.tsx` | 105 % | entre ~99 (bridé) et 178 (turbo) — voir measurement.md |
 | `LOAD_FLOOR_PCT` | `App.tsx` | 15 % | en dessous, l'absence de turbo ne prouve rien |
-| `HISTORY` | `App.tsx` | 120 | 2 minutes de courbes à 1 Hz |
+| `HISTORY` | `App.tsx` | 120 | 2 minutes de courbes à 1 Hz ; vidé au repli, faute de quoi la réouverture recollerait deux instants éloignés |
 | `CAPS_MS` | `App.tsx` | 10000 ms | les fournisseurs bougent rarement ; le hub re-sonde de son côté |
 | `POWER_MS` | `App.tsx` | 5000 ms | rattrape un changement de schéma fait depuis Windows |
 | `PHASES_MS` | `App.tsx` | 2000 ms | simple rafraîchissement d'affichage : l'accumulation est côté Rust |
@@ -102,6 +108,28 @@ raison exacte est affichée sous le tableau des fournisseurs.
 
 **Le badge dit « repos » en permanence.** Charge CPU sous 15 % : normal au bureau, la
 mesure ne conclut que sous charge.
+
+**`npm run tauri:build` échoue sur une clef absente.** `createUpdaterArtifacts` est à
+`true` dans `tauri.conf.json` : produire un installateur signe aussi les artefacts de
+mise à jour, ce qui exige `TAURI_SIGNING_PRIVATE_KEY`. Cette clef est un secret du dépôt,
+posée par le workflow de release et par lui seul — elle n'a pas à exister sur une machine
+de développement. Pour obtenir un binaire testable en local : **`npm run tauri:exe`**, qui
+compile en release sans bundler ni signer. L'exécutable atterrit dans
+`src-tauri/target/release/`.
+
+**La fenêtre de `tauri:dev` reste blanche.** Vite laissé sur son hôte par défaut
+n'écoutait que sur `[::1]`, quand la WebView résout `localhost` en IPv4 et tombe sur une
+connexion refusée — sans message, ni côté Vite ni côté WebView. Les deux bouts sont
+désormais fixés sur `127.0.0.1`, dans `vite.config.ts` et dans `devUrl`. Pour trancher en
+cas de rechute :
+
+```bash
+netstat -ano | grep ":1420"                 # sur quelle pile Vite écoute
+curl -o /dev/null -w "%{http_code}" http://127.0.0.1:1420/
+```
+
+C'est le même piège que celui documenté dans `sensors/lhm.rs` pour le serveur de
+LibreHardwareMonitor : sur Windows, `localhost` n'est pas un synonyme de `127.0.0.1`.
 
 **Le démarrage automatique ne prend pas.** C'est une tâche planifiée nommée
 « Thermal Lab » : `schtasks /Query /TN "Thermal Lab"` pour la voir, le Planificateur de

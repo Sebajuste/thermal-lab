@@ -18,7 +18,11 @@ instead of taking someone's word for it.
 ## What it does
 
 - Live CPU and GPU readings at 1 Hz: temperature, power, clock, load
-- One switch to cap the turbo on your active power plan
+- One switch to cap the CPU on your active power plan, with a choice of profile:
+  *Light* turns the turbo off, *Aggressive* also caps the clock and leans Speed Shift
+  toward saving power
+- An opt-in cap for a graphics card that draws power while doing nothing — no display,
+  no load, yet stuck in a performance state. Released at the first sign of work
 - A compare tab that averages each state separately — flip mid-game, read the difference
   at the same workload
 - Lives in the notification area; left-click the icon for the panel, right-click for the
@@ -51,8 +55,10 @@ about it.
 
 ## Good to know
 
-- Quitting leaves your power plan as it stands. Capping is a Windows setting, not a mode
-  the app holds open. The tray icon shows the current state at all times.
+- Quitting puts your power plan back exactly as it was before Thermal Lab touched it —
+  every exit, and that includes a crash, a killed task or a Windows shutdown. What it
+  cannot undo on the spot is written down and undone at the next launch. The cap lasts as
+  long as the app runs, and nothing of it is left on your machine afterwards.
 - The cap applies to the **active** power plan. Switching plans in Windows changes the
   target; the current plan name is always on screen.
 - No frames-per-second measurement — that would need an overlay, which is out of scope.

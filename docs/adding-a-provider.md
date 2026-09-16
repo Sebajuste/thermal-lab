@@ -60,7 +60,7 @@ un outil qui ne l'aidera pas.
 
 **Ne pas revendiquer ce qu'une meilleure source couvre déjà.** HWiNFO et
 LibreHardwareMonitor savent lire le GPU, mais ne déclarent que les métriques CPU :
-`nvidia-smi` est plus fiable et toujours présent avec le pilote. C'est un choix délibéré,
+NVML est plus fiable et toujours présent avec le pilote. C'est un choix délibéré,
 pas un oubli — sans quoi l'ordre global du registre devrait arbitrer CPU et GPU
 simultanément, ce qu'un simple rang ne permet pas.
 

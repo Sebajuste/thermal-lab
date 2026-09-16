@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ProfileId } from "./api";
 
 /**
  * Les libellés de l'interface, en anglais par défaut.
@@ -42,16 +43,36 @@ const en = {
   gpuTemp: "GPU temp.",
   gpuTempHint: "GPU temperature and load.",
   gpuPower: "GPU power",
-  gpuPowerHint: "GPU power draw and clock.",
+  gpuPowerHint:
+    "GPU power draw, and its clock against the card ceiling. At rest a GPU clocks down; staying near the ceiling with no load burns watts for nothing.",
   gpuLoadUnit: " % load",
   badgeCapped: "capped",
   badgeIdle: "idle",
+  badgeGpuPinned: "pinned",
+  badgeGpuBusy: "in use",
+  badgeGpuDisplay: "display",
+  gpuHeldBy: (who: string, others: number) =>
+    others > 0 ? `held by ${who} +${others}` : `held by ${who}`,
+  gpuNoClient: "no client — driver policy",
+  gpuCauseUnknown: "cause undetermined",
+  gpuFrozen: "frozen",
+  gpuClients: "Clients:",
+  mbUnit: " MB",
   measuredBy: (provider: string) => `Measured by ${provider}`,
 
   // Comparaison des phases
   compareHint: "Compare under a steady load.",
   resetAverages: "Reset the averages",
-  phaseCapped: "Capped",
+  phaseCustom: "Custom",
+  profileName: (id: ProfileId): string =>
+    ({ capped: "Light", aggressive: "Aggressive" })[id],
+  profileHint:
+    "What the switch applies. Changed while the switch is on, it applies at once.",
+  turboOff: "turbo off",
+  capAt: (pct: number) => `capped at ${pct} %`,
+  eppAt: (epp: number) => `EPP ${epp}`,
+  eppKept: "EPP unchanged",
+  externalCap: "external cap — matches no profile",
   phaseFree: "Free",
   deltaHint: "Capped minus free",
 
@@ -78,6 +99,14 @@ const en = {
 
   // Réglages de l'application
   application: "Application",
+  graphicsCard: "Graphics card",
+  gpuClampOption: "Cap the GPU when it draws power for nothing",
+  gpuClampHint:
+    "When the driver reports the card idle, no display is attached and it still holds a performance state, its clocks are locked to its own idle range. Released at the first sign of work, and on exit.",
+  gpuClampActive: "Capped to its idle state right now.",
+  gpuClampWaiting: "Watching: nothing to cap at the moment.",
+  badgeGpuClamped: "capped",
+  gpuClampedNote: "capped to idle by Thermal Lab",
   autostart: "Start with Windows, as administrator",
   autostartHint:
     "Scheduled task, run as administrator. Elevation is asked once. It targets this executable: moving it clears the box, ticking it again records the new location.",
@@ -130,15 +159,34 @@ const fr: Strings = {
   gpuTemp: "Temp. GPU",
   gpuTempHint: "Température et charge GPU.",
   gpuPower: "Puis. GPU",
-  gpuPowerHint: "Puissance et fréquence GPU.",
+  gpuPowerHint:
+    "Puissance GPU, et sa fréquence rapportée au plafond de la carte. Au repos un GPU redescend ; rester près du plafond sans charge consomme pour rien.",
   gpuLoadUnit: " % charge",
   badgeCapped: "plafonné",
   badgeIdle: "repos",
+  badgeGpuPinned: "épinglé",
+  badgeGpuBusy: "en service",
+  badgeGpuDisplay: "affichage",
+  gpuHeldBy: (who, others) =>
+    others > 0 ? `tenue par ${who} +${others}` : `tenue par ${who}`,
+  gpuNoClient: "aucun client — politique pilote",
+  gpuCauseUnknown: "cause indéterminée",
+  gpuFrozen: "figée",
+  gpuClients: "Clients :",
+  mbUnit: " Mo",
   measuredBy: (provider) => `Mesure fournie par ${provider}`,
 
   compareHint: "Comparer sous charge stable.",
   resetAverages: "Réinitialiser les moyennes",
-  phaseCapped: "Bridé",
+  phaseCustom: "Personnalisé",
+  profileName: (id) => ({ capped: "Léger", aggressive: "Agressif" })[id],
+  profileHint:
+    "Ce que l'interrupteur applique. Changé interrupteur allumé, il s'applique aussitôt.",
+  turboOff: "turbo coupé",
+  capAt: (pct) => `plafond ${pct} %`,
+  eppAt: (epp) => `EPP ${epp}`,
+  eppKept: "EPP d'origine",
+  externalCap: "bridage externe — aucun profil ne le décrit",
   phaseFree: "Libre",
   deltaHint: "Bridé moins libre",
 
@@ -163,6 +211,14 @@ const fr: Strings = {
   notMeasured: "Non mesuré ici :",
 
   application: "Application",
+  graphicsCard: "Carte graphique",
+  gpuClampOption: "Brider le GPU quand il consomme pour rien",
+  gpuClampHint:
+    "Quand le pilote déclare la carte inoccupée, qu'aucun écran ne lui est attaché et qu'elle se tient pourtant dans un état de performance, ses horloges sont verrouillées sur sa propre plage de repos. Relâché au premier signe de travail, et à la sortie.",
+  gpuClampActive: "Bridée à son état de repos en ce moment.",
+  gpuClampWaiting: "En veille : rien à brider pour l'instant.",
+  badgeGpuClamped: "bridé",
+  gpuClampedNote: "bridé au repos par Thermal Lab",
   autostart: "Démarrer avec Windows, en administrateur",
   autostartHint:
     "Tâche planifiée, exécutée en administrateur. Élévation demandée une fois. Elle vise cet exécutable : le déplacer décoche la case, la recocher inscrit le nouvel emplacement.",

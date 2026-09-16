@@ -1,8 +1,10 @@
 import {
   phaseAvg,
+  phaseOf,
   type MetricKey,
-  type PhaseSnapshot,
+  type PhaseKey,
   type PhasesSnapshot,
+  type ProfileId,
 } from "../api";
 import { t } from "../i18n";
 import Icon from "./Icon";
@@ -30,12 +32,27 @@ const duration = (s: number) =>
 
 interface Props {
   phases: PhasesSnapshot | null;
+  /** Le profil choisi : celui que l'interrupteur rallumerait. */
+  selected: ProfileId;
   onReset: () => void;
 }
 
-export default function PhaseTable({ phases, onReset }: Props) {
-  const optimized: PhaseSnapshot | undefined = phases?.optimized;
-  const free: PhaseSnapshot | undefined = phases?.free;
+/**
+ * La colonne comparée à la référence : la phase bridée en cours, ou le profil choisi
+ * quand la machine est libre — c'est celui que l'interrupteur rallumerait. Un bridage
+ * tiers a sa propre colonne, plutôt que de se mêler aux moyennes d'un profil.
+ */
+function compared(
+  phases: PhasesSnapshot | null,
+  selected: ProfileId,
+): Exclude<PhaseKey, "free"> {
+  return phases && phases.current !== "free" ? phases.current : selected;
+}
+
+export default function PhaseTable({ phases, selected, onReset }: Props) {
+  const key = compared(phases, selected);
+  const optimized = phaseOf(phases, key);
+  const free = phaseOf(phases, "free");
 
   return (
     <section className="panel">
@@ -55,7 +72,8 @@ export default function PhaseTable({ phases, onReset }: Props) {
           <tr>
             <th />
             <th title={t.turboCapped}>
-              {t.phaseCapped} · {duration(optimized?.seconds ?? 0)}
+              {key === "custom" ? t.phaseCustom : t.profileName(key)} ·{" "}
+              {duration(optimized?.seconds ?? 0)}
             </th>
             <th title={t.turboFree}>
               {t.phaseFree} · {duration(free?.seconds ?? 0)}
