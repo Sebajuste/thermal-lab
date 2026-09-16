@@ -4,6 +4,7 @@ mod flyout;
 mod i18n;
 mod phases;
 mod power;
+mod restore;
 mod settings;
 mod tools;
 mod tray;
@@ -22,8 +23,13 @@ use capabilities::Capabilities;
 use flyout::Flyout;
 use phases::{PhaseRecorder, PhasesSnapshot};
 use power::PowerState;
+use restore::{Journal, Restorer, SystemPower};
 use sensors::{Reading, SensorHub};
 use settings::Settings;
+
+/// Le gardien du schema d'alimentation : toute modification passe par lui, et il est le
+/// seul a savoir ce que la machine nous doit.
+type PowerGuard = Restorer<SystemPower>;
 
 /// Cadence panneau ouvert : c'est le rythme auquel les valeurs s'affichent, et un
 /// affichage qui traine se remarque tout de suite.
@@ -156,9 +162,23 @@ fn set_auto_update(app: AppHandle, on: bool) -> Result<bool, String> {
 /// Bascule le bridage, puis remet tout le monde d'accord : accumulateur de phases,
 /// icone, menu, et interface si elle est ouverte.
 pub(crate) fn apply_optimization(app: &AppHandle, on: bool) -> Result<PowerState, String> {
-    let state = power::set_optimized(on)?;
+    let state = app.state::<PowerGuard>().set_optimized(on)?;
     sync_power(app, &state);
     Ok(state)
+}
+
+/// Rend la machine telle qu'elle etait avant l'intervention, s'il y en a eu une.
+///
+/// Appele aux deux bouts : au demarrage, pour solder un arret qui n'a pas pu le faire
+/// lui-meme — fin de session, plantage, arret de tache — et a la sortie, pour la notre.
+/// Une erreur ici n'a plus d'interface ou s'afficher : le journal reste, et le lancement
+/// suivant reessaie.
+fn restore_machine(app: &AppHandle) {
+    match app.state::<PowerGuard>().restore() {
+        Ok(Some(state)) => sync_power(app, &state),
+        Ok(None) => {}
+        Err(e) => eprintln!("restauration du schema d'alimentation : {e}"),
+    }
 }
 
 fn sync_power(app: &AppHandle, state: &PowerState) {
@@ -219,6 +239,23 @@ pub fn run() {
             app.manage(update::Pending::default());
             app.manage(Settings::load(&handle));
 
+            // Le journal de restauration vit dans le dossier de configuration du compte,
+            // aux cotes des reglages. Sans dossier, pas de journal — et l'interrupteur
+            // refusera de brider plutot que de promettre un retour en arriere.
+            let journal = match handle.path().app_config_dir() {
+                Ok(dir) => Journal::in_dir(&dir),
+                Err(_) => Journal::nowhere(),
+            };
+            let guard = PowerGuard::new(SystemPower, journal);
+
+            // Avant de lire quoi que ce soit : un journal encore rempli signe un arret
+            // qui n'a pas pu rendre la machine. On solde la dette, et l'etat lu ensuite
+            // est celui d'une machine rendue.
+            if let Err(e) = guard.restore() {
+                eprintln!("restauration du schema d'alimentation : {e}");
+            }
+            app.manage(guard);
+
             // L'etat d'alimentation precede tout le reste : il decide de l'icone posee,
             // de la coche du menu et de la phase qui commence a accumuler.
             let initial = power::state().ok();
@@ -278,6 +315,16 @@ pub fn run() {
             update::check_update,
             update::install_update
         ])
-        .run(tauri::generate_context!())
-        .expect("Tauri failed to start");
+        .build(tauri::generate_context!())
+        .expect("Tauri failed to start")
+        // `run` plutot que la forme courte : c'est la seule qui donne la main sur la
+        // sortie. `Exit` passe quelle que soit la porte empruntee — menu de l'icone,
+        // commande du panneau, redemarrage de mise a jour — et c'est la que la machine
+        // est rendue. Ce qui ne passe par aucune porte, la fin de session Windows ou un
+        // plantage, est rattrape au lancement suivant par le journal.
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                restore_machine(app);
+            }
+        });
 }

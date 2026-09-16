@@ -51,8 +51,10 @@ about it.
 
 ## Good to know
 
-- Quitting leaves your power plan as it stands. Capping is a Windows setting, not a mode
-  the app holds open. The tray icon shows the current state at all times.
+- Quitting puts your power plan back exactly as it was before Thermal Lab touched it —
+  every exit, and that includes a crash, a killed task or a Windows shutdown. What it
+  cannot undo on the spot is written down and undone at the next launch. The cap lasts as
+  long as the app runs, and nothing of it is left on your machine afterwards.
 - The cap applies to the **active** power plan. Switching plans in Windows changes the
   target; the current plan name is always on screen.
 - No frames-per-second measurement — that would need an overlay, which is out of scope.

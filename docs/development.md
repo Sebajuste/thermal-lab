@@ -16,6 +16,7 @@ npm run tauri:build    # binaire + installateur — exige la clef de signature
 npm run build          # frontend seul : tsc puis vite build
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture   # voir les relevés réels
+powershell -File scripts/check-restore.ps1   # état réel de la machine + journal de restauration
 ```
 
 **Lancer depuis un terminal élevé** pour que l'interrupteur de bridage soit actif. Sans
@@ -36,6 +37,7 @@ démode à chaque commit :
 | `registry.rs` | identifiants uniques, tout externe a une URL, ordre de priorité |
 | `hub.rs` | le cycle d'une source : retentée au bon moment, lue dès qu'elle apparaît, perdue dès qu'elle se tait |
 | `power.rs` | parsing du GUID en français et en anglais, rejet des chaînes malformées |
+| `restore.rs` | la garantie d'arrêt : référence prise avant l'intervention et jamais réécrite, restauration du bon schéma, journal qui survit au process, échec qui laisse la dette, refus de brider sans journal |
 | `shared_memory.rs` | décodage des chaînes C, absence de section non fatale |
 | `hwinfo.rs` | dispositions mémoire — `size_of` 320 et 48, alignement du `__time64_t` |
 | `core_temp.rs` | décodage validé contre la vraie section partagée |

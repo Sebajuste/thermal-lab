@@ -30,8 +30,12 @@ const PERFBOOSTMODE: &str = "be337238-0d82-4146-a960-4f3749d470c7";
 const PROCTHROTTLEMAX: &str = "bc5038f7-23e0-4960-96da-33abaf5935ec";
 
 /// Valeurs par defaut de Windows quand la cle n'existe pas dans le schema.
-const DEFAULT_BOOST_MODE: u32 = 2; // aggressive
-const DEFAULT_THROTTLE_MAX: u32 = 100;
+pub(crate) const DEFAULT_BOOST_MODE: u32 = 2; // aggressive
+pub(crate) const DEFAULT_THROTTLE_MAX: u32 = 100;
+
+/// Valeurs du bridage : turbo interdit par l'un et l'autre levier.
+pub(crate) const CAPPED_BOOST_MODE: u32 = 0;
+pub(crate) const CAPPED_THROTTLE_MAX: u32 = 99;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,11 +161,15 @@ pub fn state() -> Result<PowerState, String> {
     })
 }
 
-/// Active ou desactive le bridage sur le schema courant.
+/// Pose deux valeurs sur un schema donne, et les applique.
+///
+/// Le schema vise est passe en parametre plutot que relu : une restauration doit
+/// remettre en etat le schema qu'on a modifie, meme si Windows en a active un autre
+/// entre-temps.
 ///
 /// On ecrit les valeurs secteur *et* batterie : sur une tour la seconde ne sert a rien,
 /// mais laisser les deux coherentes evite un comportement different sur onduleur.
-pub fn set_optimized(on: bool) -> Result<PowerState, String> {
+pub fn write_values(scheme_guid: &str, boost_mode: u32, throttle_max: u32) -> Result<(), String> {
     if !is_elevated() {
         return Err(crate::t!(
             "administrator rights are required to change the power scheme",
@@ -170,23 +178,25 @@ pub fn set_optimized(on: bool) -> Result<PowerState, String> {
         .to_string());
     }
 
-    let (guid, _) = active_scheme()?;
-    let boost = if on { "0" } else { "2" };
-    let throttle = if on { "99" } else { "100" };
+    let boost = boost_mode.to_string();
+    let throttle = throttle_max.to_string();
 
     for (verb, value, setting) in [
-        ("/setacvalueindex", boost, PERFBOOSTMODE),
-        ("/setdcvalueindex", boost, PERFBOOSTMODE),
-        ("/setacvalueindex", throttle, PROCTHROTTLEMAX),
-        ("/setdcvalueindex", throttle, PROCTHROTTLEMAX),
+        ("/setacvalueindex", &boost, PERFBOOSTMODE),
+        ("/setdcvalueindex", &boost, PERFBOOSTMODE),
+        ("/setacvalueindex", &throttle, PROCTHROTTLEMAX),
+        ("/setdcvalueindex", &throttle, PROCTHROTTLEMAX),
     ] {
-        powercfg(&[verb, &guid, SUB_PROCESSOR, setting, value])?;
+        powercfg(&[verb, scheme_guid, SUB_PROCESSOR, setting, value])?;
     }
 
     // Sans /setactive, les valeurs sont ecrites mais pas appliquees au systeme.
-    powercfg(&["/setactive", &guid])?;
+    // Le schema reactive est l'actif, qui n'est pas forcement celui qu'on vient
+    // d'ecrire : reactiver un autre schema changerait le reglage de la machine.
+    let (active, _) = active_scheme()?;
+    powercfg(&["/setactive", &active])?;
 
-    state()
+    Ok(())
 }
 
 #[cfg(test)]

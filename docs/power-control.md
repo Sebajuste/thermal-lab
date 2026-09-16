@@ -45,6 +45,42 @@ powercfg /setactive <guid>
 **Le `/setactive` final n'est pas optionnel** : sans lui les valeurs sont écrites mais
 jamais appliquées.
 
+## La garantie d'arrêt
+
+**L'arrêt de Thermal Lab, quelle qu'en soit la cause, rend la machine dans l'état où elle
+était avant l'intervention.** Le bridage est un réglage de Windows, pas un mode que
+l'application tiendrait ouvert : rien ne le défait tout seul.
+
+Le mécanisme est un journal, `restore.json`, dans le dossier de configuration du compte,
+à côté de `settings.json`. Il porte le GUID du schéma et ses deux valeurs **d'avant**.
+
+```
+armé  →  écrit avant la première modification, jamais après
+purgé →  une fois la machine réellement rendue, jamais avant
+```
+
+| Cause de l'arrêt | Ce qui restaure |
+|---|---|
+| Menu de l'icône, commande du panneau | `RunEvent::Exit`, dans la boucle d'événements |
+| Redémarrage d'une mise à jour | la nouvelle instance, qui trouve le journal |
+| Fin de session Windows, arrêt de tâche, plantage | le lancement suivant, avant toute lecture |
+| Échec de la restauration elle-même | le journal reste : la dette est retentée plus tard |
+
+Trois conséquences à garder en tête :
+
+- **La référence est l'état d'avant, pas les valeurs par défaut de Windows.** Une machine
+  déjà bridée par un outil tiers retrouve *son* bridage. Les défauts (`2` / `100`) ne
+  servent que si la référence est perdue — journal illisible, ou bridage qui ne vient pas
+  de nous.
+- **Le schéma restauré est celui qu'on a modifié**, pas l'actif du moment : son GUID est
+  dans le journal, et Windows a pu en activer un autre entre-temps.
+- **Sans journal possible, pas de bridage.** Si le dossier de configuration est
+  introuvable, l'interrupteur renvoie une erreur plutôt que de promettre un retour en
+  arrière qu'il ne pourrait pas tenir.
+
+Une seconde pression sur l'interrupteur n'écrase pas la référence : elle date de la
+première intervention, sinon l'état bridé s'enregistrerait comme état d'origine.
+
 ## Pièges rencontrés
 
 ### Le test d'élévation
@@ -82,6 +118,12 @@ powercfg /duplicatescheme <guid>   # s'en faire une copie pérenne
 Dupliquer avant de désinstaller l'outil qui l'a créé, sinon le réglage part avec lui.
 
 ## Vérifier à la main
+
+`scripts/check-restore.ps1` rend les deux valeurs du schéma actif et l'état du journal,
+en lecture seule et sans élévation. Le lancer avant, pendant et après une session prouve
+la garantie d'arrêt sur la vraie machine — y compris en tuant le processus.
+
+Le détail, si on préfère le faire soi-même :
 
 ```powershell
 $g = [regex]::Match((powercfg /getactivescheme), '[0-9a-f-]{36}').Value
