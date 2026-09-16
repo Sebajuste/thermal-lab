@@ -8,8 +8,13 @@
 //! Sur un Intel, le second suffit ; on pose les deux, comme le fait Windows lui-meme, pour
 //! rester coherent quel que soit le pilote de performance (legacy ou Intel Speed Shift).
 //!
+//! Un troisieme levier, PERFEPP, oriente Speed Shift vers la performance ou l'economie.
+//! Quelles valeurs poser, et quand, est l'affaire de `profiles` : ce module ne fait que
+//! lire et ecrire.
+//!
 //! Lecture par le registre, car `powercfg /query` n'affiche rien pour ces reglages quand
-//! leur attribut est masque. Ecriture par `powercfg`, qui gere la propagation au systeme.
+//! leur attribut est masque — sauf PERFEPP, lue par `powercfg /qh`, voir `read_epp`.
+//! Ecriture par `powercfg`, qui gere la propagation au systeme.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,13 +35,21 @@ const SCHEMES_PATH: &str = r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSc
 const SUB_PROCESSOR: &str = "54533251-82be-4824-96c1-47b60b740d00";
 const PERFBOOSTMODE: &str = "be337238-0d82-4146-a960-4f3749d470c7";
 const PROCTHROTTLEMAX: &str = "bc5038f7-23e0-4960-96da-33abaf5935ec";
+/// Preference d'energie de Speed Shift, 0 a 100 : plus haut, plus econome. Ignoree par
+/// un processeur sans HWP, mais ecrite quand meme — le schema la garde.
+const PERFEPP: &str = "36687f9e-e3a5-4dbf-b1dc-15eb381c6863";
 
 /// Les valeurs des leviers CPU, telles que le schema les porte.
+///
+/// `epp` est optionnel, et son absence ne dit pas la meme chose selon l'endroit : dans
+/// un etat relu, la valeur n'a pas pu etre lue ; dans un profil, le profil ne fixe pas
+/// ce levier ; dans une ecriture, il n'est pas touche.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Targets {
     pub boost_mode: u32,
     pub throttle_max: u32,
+    pub epp: Option<u32>,
 }
 
 impl Targets {
@@ -47,9 +60,13 @@ impl Targets {
 }
 
 /// Valeurs par defaut de Windows quand la cle n'existe pas dans le schema.
+///
+/// Pas de defaut pour `epp` : il depend du schema — 33 pour Equilibre, 60 pour
+/// Economie d'energie — et `powercfg /qh` le resout tout seul a la lecture.
 pub(crate) const WINDOWS_DEFAULTS: Targets = Targets {
     boost_mode: 2, // aggressive
     throttle_max: 100,
+    epp: None,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,8 +76,10 @@ pub struct PowerState {
     pub scheme_name: String,
     pub boost_mode: u32,
     pub throttle_max: u32,
-    /// Vrai quand le turbo est effectivement interdit, par l'un ou l'autre des deux leviers.
-    /// C'est l'etat de l'interrupteur principal, quel que soit le profil qui bride.
+    /// `None` quand la valeur n'a pas pu etre lue.
+    pub epp: Option<u32>,
+    /// Vrai quand le turbo est interdit, ou qu'un de nos profils est applique. C'est
+    /// l'etat de l'interrupteur principal, quel que soit ce qui bride.
     pub optimized: bool,
     /// Le profil connu dont les valeurs sont exactement celles-ci. `None` pour une machine
     /// rendue, et pour un bridage qu'aucun profil ne decrit — pose par un outil tiers.
@@ -71,13 +90,15 @@ pub struct PowerState {
 impl PowerState {
     /// Tout ce qui se deduit des valeurs est deduit ici, et nulle part ailleurs.
     pub fn new(scheme_guid: String, scheme_name: String, targets: Targets, elevated: bool) -> Self {
+        let profile = profiles::identify(targets);
         Self {
             scheme_guid,
             scheme_name,
             boost_mode: targets.boost_mode,
             throttle_max: targets.throttle_max,
-            optimized: targets.caps_turbo(),
-            profile: profiles::identify(targets),
+            epp: targets.epp,
+            optimized: targets.caps_turbo() || profile.is_some(),
+            profile,
             elevated,
         }
     }
@@ -180,11 +201,37 @@ pub(crate) fn is_elevated() -> bool {
     }
 }
 
+/// La preference d'energie effective du schema, en courant alternatif.
+///
+/// Pas par le registre : la cle y est absente tant que personne ne l'a ecrite, et la
+/// valeur vient alors des defauts propres a chaque schema — introuvables pour un schema
+/// cree par l'utilisateur. `powercfg /qh` resout les deux cas, reglage masque compris,
+/// pour une vingtaine de millisecondes.
+fn read_epp(guid: &str) -> Option<u32> {
+    powercfg(&["/qh", guid, SUB_PROCESSOR, PERFEPP])
+        .ok()
+        .and_then(|out| ac_index(&out))
+}
+
+/// La sortie est localisee, mais ses valeurs ne le sont pas : minimum, maximum,
+/// increment, puis index secteur et index batterie, tous en `0x` sur huit chiffres.
+/// L'index secteur est l'avant-dernier.
+fn ac_index(text: &str) -> Option<u32> {
+    let values: Vec<u32> = text
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter_map(|t| t.strip_prefix("0x"))
+        .filter(|h| h.len() == 8)
+        .filter_map(|h| u32::from_str_radix(h, 16).ok())
+        .collect();
+    values.len().checked_sub(2).map(|i| values[i])
+}
+
 pub fn state() -> Result<PowerState, String> {
     let (guid, name) = active_scheme()?;
     let targets = Targets {
         boost_mode: read_setting(&guid, PERFBOOSTMODE, WINDOWS_DEFAULTS.boost_mode),
         throttle_max: read_setting(&guid, PROCTHROTTLEMAX, WINDOWS_DEFAULTS.throttle_max),
+        epp: read_epp(&guid),
     };
     Ok(PowerState::new(guid, name, targets, is_elevated()))
 }
@@ -216,6 +263,12 @@ pub fn write_values(scheme_guid: &str, targets: Targets) -> Result<(), String> {
         ("/setdcvalueindex", &throttle, PROCTHROTTLEMAX),
     ] {
         powercfg(&[verb, scheme_guid, SUB_PROCESSOR, setting, value])?;
+    }
+    if let Some(epp) = targets.epp {
+        let epp = epp.to_string();
+        for verb in ["/setacvalueindex", "/setdcvalueindex"] {
+            powercfg(&[verb, scheme_guid, SUB_PROCESSOR, PERFEPP, &epp])?;
+        }
     }
 
     // Sans /setactive, les valeurs sont ecrites mais pas appliquees au systeme.
@@ -249,6 +302,40 @@ mod tests {
             Some("381b4222-f694-41f0-9685-ff5bb260df2e")
         );
         assert_eq!(extract_name(en), "Balanced");
+    }
+
+    /// Sortie reelle de `powercfg /qh` sur le schema Equilibre : 33 sur secteur.
+    #[test]
+    fn reads_the_ac_index_from_localized_output() {
+        let fr = "GUID du mode de gestion de l'alimentation : 381b4222-f694-41f0-9685-ff5bb260df2e  (Utilisation normale)
+  GUID du sous-groupe : 54533251-82be-4824-96c1-47b60b740d00  (Gestion de l'alimentation du processeur)
+    GUID du parametre d'alimentation : 36687f9e-e3a5-4dbf-b1dc-15eb381c6863
+      Valeur minimale possible : 0x00000000
+      Valeur maximale possible : 0x00000064
+      Increment possible des parametres : 0x00000001
+      Unites possibles des parametres :  %
+    Index actuel du parametre de courant alternatif : 0x00000021
+    Index actuel du parametre de courant continu : 0x00000032";
+        assert_eq!(ac_index(fr), Some(33));
+
+        let en = "    Current AC Power Setting Index: 0x0000003c
+    Current DC Power Setting Index: 0x00000050";
+        assert_eq!(ac_index(en), Some(60));
+    }
+
+    #[test]
+    fn no_index_means_no_value() {
+        assert_eq!(ac_index("Le parametre n'existe pas."), None);
+        assert_eq!(ac_index("Index : 0x00000021"), None);
+    }
+
+    /// Lit la machine reelle, sans rien ecrire : `cargo test -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn reads_the_real_scheme() {
+        let s = state().expect("schema lisible");
+        println!("{s:#?}");
+        assert!(s.epp.is_some(), "EPP illisible sur cette machine");
     }
 
     #[test]

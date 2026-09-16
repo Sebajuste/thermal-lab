@@ -2,15 +2,20 @@
 
 ## Ce qui est manipulé
 
-Deux réglages du sous-groupe processeur, sur le schéma d'alimentation **actif**, en
+Trois réglages du sous-groupe processeur, sur le schéma d'alimentation **actif**, en
 secteur et en batterie.
 
-| Réglage | GUID | Bridé | Libre |
-|---|---|---|---|
-| `PERFBOOSTMODE` | `be337238-0d82-4146-a960-4f3749d470c7` | `0` (turbo désactivé) | `2` (agressif, défaut) |
-| `PROCTHROTTLEMAX` | `bc5038f7-23e0-4960-96da-33abaf5935ec` | `99` % | `100` % |
+| Réglage | GUID | Libre (défaut Windows) |
+|---|---|---|
+| `PERFBOOSTMODE` | `be337238-0d82-4146-a960-4f3749d470c7` | `2` (agressif) |
+| `PROCTHROTTLEMAX` | `bc5038f7-23e0-4960-96da-33abaf5935ec` | `100` % |
+| `PERFEPP` | `36687f9e-e3a5-4dbf-b1dc-15eb381c6863` | propre au schéma : `33` Équilibré, `60` Économie d'énergie |
 
 Sous-groupe processeur : `54533251-82be-4824-96c1-47b60b740d00`.
+
+`PERFEPP` est la préférence d'énergie de Speed Shift, de `0` (performance) à `100`
+(économie). Un processeur sans HWP l'ignore ; elle est écrite quand même, le schéma la
+garde. Les valeurs posées par chaque profil sont dans « Les profils ».
 
 Sur un Intel, le plafond à 99 % suffit à interdire le turbo. Les deux sont posés pour
 rester cohérent quel que soit le pilote de performance en usage — ancien modèle ou Intel
@@ -20,7 +25,14 @@ C'est exactement le levier des « optimiseurs » du commerce. Aucune technologie
 propriétaire n'est en jeu : le produit qui a motivé ce POC créait simplement un schéma
 d'alimentation nommé avec ces deux valeurs.
 
-## Lecture par le registre, écriture par powercfg
+## Lecture par le registre et par `powercfg /qh`, écriture par powercfg
+
+**Lecture de l'EPP.** Par `powercfg /qh`, qui affiche aussi les réglages masqués. Le
+registre ne suffit pas : la clé est absente tant que personne ne l'a écrite, la valeur
+vient alors de `DefaultPowerSchemeValues` — propre à chaque schéma, et absente pour un
+schéma créé par l'utilisateur. La sortie est localisée, pas ses valeurs : minimum,
+maximum, incrément, index secteur, index batterie, tous en `0x` sur huit chiffres.
+L'index secteur est l'avant-dernier. Une vingtaine de millisecondes.
 
 **Lecture.** `powercfg /query` n'affiche rien pour ces réglages quand leur attribut est
 masqué — et les outils tiers les masquent. On lit donc directement :
@@ -85,15 +97,35 @@ première intervention, sinon l'état bridé s'enregistrerait comme état d'orig
 
 L'interrupteur principal ne connaît que deux gestes : **appliquer un profil**, ou **rendre
 la machine**. Un profil est une donnée — des cibles nommées, levier par levier — décrite
-dans `profiles.rs`. Le bridage historique en est le premier : `capped`, `0` / `99`.
+dans `profiles.rs`. Le sélecteur, sous l'interrupteur, dit lequel.
+
+| Profil | Libellé | `PERFBOOSTMODE` | `PROCTHROTTLEMAX` | `PERFEPP` |
+|---|---|---|---|---|
+| `capped` | Léger | `0` | `99` % | non fixé — valeur d'origine |
+| `aggressive` | Agressif | `0` | `80` % | `60` |
+
+`capped` est le bridage historique, inchangé. Pour `aggressive`, `60` n'est pas une
+valeur inventée : c'est celle que Windows pose lui-même dans son schéma Économie
+d'énergie. `80` % est un point de départ, à juger au comparatif — sous le nominal, le
+profil retire des performances même quand le turbo n'aurait pas été sollicité.
 
 ```
-interrupteur   allumé → Restorer::engage(profil)     éteint → Restorer::release()
+interrupteur   allumé → Restorer::engage(profil choisi)    éteint → Restorer::release()
+sélecteur      set_profile → settings.json ; appliqué aussitôt si l'interrupteur est allumé
 profil         { id, cibles, nature }
-leviers        PERFBOOSTMODE, PROCTHROTTLEMAX
+leviers        PERFBOOSTMODE, PROCTHROTTLEMAX, PERFEPP
 ```
 
-**Le profil actif ne se mémorise pas, il se relit.** Le registre rend des valeurs, pas un
+**Un levier qu'un profil ne fixe pas revient à sa valeur d'origine**, prise dans le
+journal. Sans cela, passer d'Agressif à Léger laisserait l'EPP à `60`, et la machine ne
+ressemblerait plus à aucun des deux profils. C'est aussi pourquoi la reconnaissance d'un
+profil ignore les leviers qu'il ne fixe pas : Léger se reconnaît quelle que soit l'EPP.
+
+**Le choix est une intention, l'état reste relu.** `settings.json` retient le profil
+choisi ; le sélecteur colore en vert celui que le schéma désigne réellement. Les deux
+coïncident après un choix, et divergent seulement si un outil tiers passe derrière.
+
+**Le profil actif ne se mémorise pas, il se relit.** Le schéma rend des valeurs, pas un
 nom : `PowerState` compare ces valeurs aux profils connus et en déduit `profile`. Trois
 cas, et le troisième n'est pas une erreur :
 
@@ -103,14 +135,19 @@ cas, et le troisième n'est pas une erreur :
 | exactement celles d'un profil | vrai | ce profil | ce profil |
 | un bridage qu'aucun profil ne décrit | vrai | `null` | personnalisée |
 
-Mémoriser le profil choisi dans `settings.json` et l'afficher comme état ferait mentir
-l'interface dès qu'un outil tiers passe derrière — voir « Le schéma actif change sous les
-pieds ». L'intention de l'utilisateur, elle, est une préférence de l'application : elle
-aura sa place dans les réglages le jour où plusieurs profils seront proposés.
+Afficher le profil choisi comme état ferait mentir l'interface dès qu'un outil tiers
+passe derrière — voir « Le schéma actif change sous les pieds ». Le sélecteur signale
+alors « bridage externe » plutôt que de ranger ce bridage sous le profil choisi.
 
 **La garantie d'arrêt ne dépend pas du profil.** La référence est prise avant la première
 modification, quel que soit le profil appliqué, et passer d'un profil à un autre ne la
 réécrit pas. Rendre la machine reste un geste unique.
+
+Elle porte désormais l'EPP d'origine. Un journal écrit par une version antérieure n'en a
+pas : il se relit, et sa restauration laisse l'EPP en l'état — cette version-là n'y avait
+pas touché. Seul un journal **illisible** laisse une limite : les défauts de Windows sont
+posés pour le turbo et le plafond, mais l'EPP n'a pas de défaut universel et reste où elle
+est.
 
 **Chaque profil déclare sa nature** : un arbitrage retire des performances, une
 suppression de gaspillage n'en retire pas. La comparaison de phases n'a pas le même sens

@@ -18,7 +18,9 @@ instead of taking someone's word for it.
 ## What it does
 
 - Live CPU and GPU readings at 1 Hz: temperature, power, clock, load
-- One switch to cap the turbo on your active power plan
+- One switch to cap the CPU on your active power plan, with a choice of profile:
+  *Light* turns the turbo off, *Aggressive* also caps the clock and leans Speed Shift
+  toward saving power
 - A compare tab that averages each state separately — flip mid-game, read the difference
   at the same workload
 - Lives in the notification area; left-click the icon for the panel, right-click for the

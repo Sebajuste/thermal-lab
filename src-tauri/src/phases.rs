@@ -400,6 +400,7 @@ mod tests {
                 Targets {
                     boost_mode,
                     throttle_max,
+                    epp: None,
                 },
                 true,
             )

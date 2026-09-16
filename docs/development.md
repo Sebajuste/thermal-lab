@@ -36,7 +36,7 @@ démode à chaque commit :
 | `metric.rs` | la règle d'arbitrage : premier servi, rejet des non-finis, un échec laisse la place |
 | `registry.rs` | identifiants uniques, tout externe a une URL, ordre de priorité |
 | `hub.rs` | le cycle d'une source : retentée au bon moment, lue dès qu'elle apparaît, perdue dès qu'elle se tait |
-| `power.rs` | parsing du GUID en français et en anglais, rejet des chaînes malformées |
+| `power.rs` | parsing du GUID et de l'index secteur de `powercfg /qh`, en français et en anglais, rejet des chaînes malformées ; `cargo test reads_the_real_scheme -- --ignored --nocapture` lit le schéma réel sans rien écrire |
 | `restore.rs` | la garantie d'arrêt : référence prise avant l'intervention et jamais réécrite, restauration du bon schéma, journal qui survit au process, échec qui laisse la dette, refus de brider sans journal |
 | `shared_memory.rs` | décodage des chaînes C, absence de section non fatale |
 | `hwinfo.rs` | dispositions mémoire — `size_of` 320 et 48, alignement du `__time64_t` |
@@ -44,7 +44,7 @@ démode à chaque commit :
 | `lhm.rs` | aplatissement de `data.json`, capteurs sans lecture écartés |
 | `libre_hw.rs`, `amd_gpu.rs` | le tri des capteurs : package avant cœurs, une seule carte, rien hors du CPU |
 | `phases.rs` | aiguillage vers la bonne phase, bridage tiers tenu à part, durée juste malgré un changement de cadence, clés sérialisées sans collision, remise à zéro |
-| `profiles.rs` | chaque profil désigné par son identifiant, cibles distinctes et jamais égales à une machine rendue, bridage d'origine inchangé |
+| `profiles.rs` | chaque profil désigné par son identifiant, aucun état de machine qui satisfasse deux profils, aucun qui ressemble à une machine rendue, interrupteur allumé pour chacun, bridage d'origine inchangé |
 | `tools.rs` | cohérence des états rapportés, développement des `%VAR%`, énumération des processus |
 | `autostart.rs` | la tâche est élevée, silencieuse, liée au logon ; guillemets imbriqués de l'action ; une tâche restée sur un ancien emplacement ne compte pas |
 

@@ -24,6 +24,7 @@ use capabilities::Capabilities;
 use flyout::Flyout;
 use phases::{PhaseKey, PhaseRecorder, PhasesSnapshot};
 use power::PowerState;
+use profiles::{ProfileId, ProfileInfo};
 use restore::{Journal, Restorer, SystemPower};
 use sensors::{Reading, SensorHub};
 use settings::Settings;
@@ -60,6 +61,20 @@ struct UiState {
     auto_update: bool,
     /// Celle du paquet, pas celle du frontend : c'est elle que la mise a jour compare.
     version: String,
+    /// Le profil que l'interrupteur applique : une preference, pas l'etat de la machine.
+    profile: ProfileId,
+    /// Les profils proposes, dans l'ordre de presentation. Tenus cote Rust : ce sont eux
+    /// que l'interrupteur applique, et une copie dans le frontend finirait par diverger.
+    profiles: Vec<ProfileInfo>,
+}
+
+/// La reponse a un changement de profil : ce qui a ete enregistre, et la machine telle
+/// qu'elle est ensuite.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileChoice {
+    profile: ProfileId,
+    power: PowerState,
 }
 
 #[tauri::command]
@@ -132,6 +147,8 @@ fn ui_state(app: AppHandle) -> UiState {
         autostart: autostart::is_enabled(),
         auto_update: app.state::<Settings>().prefs().auto_update,
         version: app.package_info().version.to_string(),
+        profile: app.state::<Settings>().prefs().profile,
+        profiles: profiles::catalog(),
     }
 }
 
@@ -160,14 +177,33 @@ fn set_auto_update(app: AppHandle, on: bool) -> Result<bool, String> {
     Ok(app.state::<Settings>().set_auto_update(on)?.auto_update)
 }
 
+/// Enregistre le profil choisi, et l'applique aussitot si l'interrupteur est allume :
+/// changer de profil en cours de route ne doit pas demander d'eteindre puis de rallumer.
+///
+/// Eteint, on n'ecrit rien sur la machine — le choix attend le prochain allumage.
+#[tauri::command]
+fn set_profile(app: AppHandle, id: ProfileId) -> Result<ProfileChoice, String> {
+    let profile = app.state::<Settings>().set_profile(id)?.profile;
+    let current = power::state()?;
+    let power = if current.optimized {
+        let state = app.state::<PowerGuard>().engage(profiles::get(profile))?;
+        sync_power(&app, &state);
+        state
+    } else {
+        current
+    };
+    Ok(ProfileChoice { profile, power })
+}
+
 /// Bascule l'interrupteur principal, puis remet tout le monde d'accord : accumulateur de
 /// phases, icone, menu, et interface si elle est ouverte.
 ///
-/// Allume, il applique le profil par defaut ; eteint, il rend la machine.
+/// Allume, il applique le profil choisi ; eteint, il rend la machine.
 pub(crate) fn apply_optimization(app: &AppHandle, on: bool) -> Result<PowerState, String> {
     let guard = app.state::<PowerGuard>();
     let state = if on {
-        guard.engage(profiles::get(profiles::DEFAULT))?
+        let chosen = app.state::<Settings>().prefs().profile;
+        guard.engage(profiles::get(chosen))?
     } else {
         guard.release()?
     };
@@ -320,6 +356,7 @@ pub fn run() {
             set_pinned,
             set_autostart,
             set_auto_update,
+            set_profile,
             update::check_update,
             update::install_update
         ])

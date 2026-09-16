@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ProfileId } from "./api";
 
 /**
  * Les libellés de l'interface, en anglais par défaut.
@@ -62,8 +63,16 @@ const en = {
   // Comparaison des phases
   compareHint: "Compare under a steady load.",
   resetAverages: "Reset the averages",
-  phaseCapped: "Capped",
   phaseCustom: "Custom",
+  profileName: (id: ProfileId): string =>
+    ({ capped: "Light", aggressive: "Aggressive" })[id],
+  profileHint:
+    "What the switch applies. Changed while the switch is on, it applies at once.",
+  turboOff: "turbo off",
+  capAt: (pct: number) => `capped at ${pct} %`,
+  eppAt: (epp: number) => `EPP ${epp}`,
+  eppKept: "EPP unchanged",
+  externalCap: "external cap — matches no profile",
   phaseFree: "Free",
   deltaHint: "Capped minus free",
 
@@ -161,8 +170,15 @@ const fr: Strings = {
 
   compareHint: "Comparer sous charge stable.",
   resetAverages: "Réinitialiser les moyennes",
-  phaseCapped: "Bridé",
   phaseCustom: "Personnalisé",
+  profileName: (id) => ({ capped: "Léger", aggressive: "Agressif" })[id],
+  profileHint:
+    "Ce que l'interrupteur applique. Changé interrupteur allumé, il s'applique aussitôt.",
+  turboOff: "turbo coupé",
+  capAt: (pct) => `plafond ${pct} %`,
+  eppAt: (epp) => `EPP ${epp}`,
+  eppKept: "EPP d'origine",
+  externalCap: "bridage externe — aucun profil ne le décrit",
   phaseFree: "Libre",
   deltaHint: "Bridé moins libre",
 

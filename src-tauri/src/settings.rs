@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+
+use crate::profiles::ProfileId;
 use tauri::{AppHandle, Manager};
 
 const FILE: &str = "settings.json";
@@ -24,6 +26,9 @@ pub struct Prefs {
     /// Faux par defaut : une application qui se remplace toute seule, elevee, doit avoir
     /// ete autorisee a le faire. La coche est le consentement.
     pub auto_update: bool,
+    /// Le profil que l'interrupteur appliquera. Une intention, pas un etat : le profil
+    /// reellement applique se relit dans le schema d'alimentation.
+    pub profile: ProfileId,
 }
 
 pub struct Settings {
@@ -66,6 +71,19 @@ impl Settings {
         Ok(next)
     }
 
+    /// Meme contrat que `set_auto_update` : la reponse est ce qui a ete ecrit.
+    pub fn set_profile(&self, profile: ProfileId) -> Result<Prefs, String> {
+        let next = {
+            let mut prefs = self.prefs.lock().map_err(|_| {
+                crate::t!("settings unusable", "réglages inutilisables").to_string()
+            })?;
+            prefs.profile = profile;
+            *prefs
+        };
+        self.save(&next)?;
+        Ok(next)
+    }
+
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
         let Some(path) = self.path.as_ref() else {
             return Err(crate::t!(
@@ -98,13 +116,20 @@ mod tests {
     fn reads_a_file_written_by_an_older_version() {
         let prefs: Prefs = serde_json::from_str("{}").expect("objet vide accepte");
         assert!(!prefs.auto_update);
+        assert_eq!(prefs.profile, crate::profiles::DEFAULT);
     }
 
     #[test]
     fn round_trips_through_json() {
-        let raw = serde_json::to_string(&Prefs { auto_update: true }).expect("serialisable");
+        let prefs = Prefs {
+            auto_update: true,
+            profile: ProfileId::Aggressive,
+        };
+        let raw = serde_json::to_string(&prefs).expect("serialisable");
         assert!(raw.contains("autoUpdate"), "{raw}");
+        assert!(raw.contains("\"profile\":\"aggressive\""), "{raw}");
         let back: Prefs = serde_json::from_str(&raw).expect("relisible");
         assert!(back.auto_update);
+        assert_eq!(back.profile, ProfileId::Aggressive);
     }
 }

@@ -91,10 +91,7 @@ export interface Capabilities {
 }
 
 /** Miroir de `profiles::ProfileId`. */
-export type ProfileId = "capped";
-
-/** Le profil que l'interrupteur applique — miroir de `profiles::DEFAULT`. */
-export const DEFAULT_PROFILE: ProfileId = "capped";
+export type ProfileId = "capped" | "aggressive";
 
 /** Miroir de `profiles::Nature` : un arbitrage, ou une suppression de gaspillage. */
 export type Nature = "tradeoff" | "waste";
@@ -105,6 +102,8 @@ export interface PowerState {
   schemeName: string;
   boostMode: number;
   throttleMax: number;
+  /** Préférence d'énergie de Speed Shift ; `null` si illisible. */
+  epp: number | null;
   /** Quelque chose bride la machine : l'état de l'interrupteur principal. */
   optimized: boolean;
   /** Le profil connu que les valeurs relues désignent ; `null` libre ou bridage tiers. */
@@ -166,6 +165,26 @@ export interface UiState {
   autoUpdate: boolean;
   /** Celle du paquet installé, celle que la mise à jour compare. */
   version: string;
+  /** Le profil que l'interrupteur applique : une préférence, pas l'état de la machine. */
+  profile: ProfileId;
+  /** Les profils proposés, dans l'ordre de présentation. */
+  profiles: ProfileInfo[];
+}
+
+/** Miroir de `profiles::ProfileInfo`. */
+export interface ProfileInfo {
+  id: ProfileId;
+  nature: Nature;
+  boostMode: number;
+  throttleMax: number;
+  /** `null` : le profil ne fixe pas ce levier, il reste à sa valeur d'origine. */
+  epp: number | null;
+}
+
+/** Miroir de `ProfileChoice` : ce qui a été enregistré, et la machine ensuite. */
+export interface ProfileChoice {
+  profile: ProfileId;
+  power: PowerState;
 }
 
 /** Miroir de `update::UpdateInfo`. */
@@ -197,6 +216,9 @@ export const setAutostart = (on: boolean) => invoke<boolean>("set_autostart", { 
 
 /** Rend l'état réellement enregistré : une écriture refusée décoche la case. */
 export const setAutoUpdate = (on: boolean) => invoke<boolean>("set_auto_update", { on });
+
+/** Enregistre le profil, et l'applique aussitôt si l'interrupteur est allumé. */
+export const chooseProfile = (id: ProfileId) => invoke<ProfileChoice>("set_profile", { id });
 
 /** Miroir de `update::Progress`, poussé par l'événement `update-progress`. */
 export interface UpdateProgress {

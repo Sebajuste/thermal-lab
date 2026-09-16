@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   checkUpdate,
+  chooseProfile,
   hideWindow,
   providerOf,
   quitApp,
@@ -20,6 +21,8 @@ import {
   type GpuHolder,
   type MetricKey,
   type PhasesSnapshot,
+  type ProfileId,
+  type ProfileInfo,
   type PowerState,
   type Reading,
   type UpdateInfo,
@@ -28,6 +31,7 @@ import { t } from "./i18n";
 import Icon from "./components/Icon";
 import MetricCard, { type Badge } from "./components/MetricCard";
 import PhaseTable from "./components/PhaseTable";
+import ProfilePicker from "./components/ProfilePicker";
 import ProvidersPanel from "./components/ProvidersPanel";
 import Sparkline from "./components/Sparkline";
 import SlideDeck from "./components/SlideDeck";
@@ -212,6 +216,8 @@ export default function App() {
   const [pinned, setPinnedState] = useState(false);
   const [autostart, setAutostartState] = useState(false);
   const [autoUpdate, setAutoUpdateState] = useState(false);
+  const [profile, setProfileState] = useState<ProfileId>("capped");
+  const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   // La bascule passe par une tâche planifiée, donc par une invite UAC : le temps que
@@ -246,6 +252,8 @@ export default function App() {
         setAutostartState(s.autostart);
         setAutoUpdateState(s.autoUpdate);
         setVersion(s.version);
+        setProfileState(s.profile);
+        setProfiles(s.profiles);
       })
       .catch(() => {});
   }, []);
@@ -395,6 +403,26 @@ export default function App() {
     }
   }, [power, busy]);
 
+  // Même verrou que l'interrupteur : les deux peuvent écrire le schéma, et powercfg
+  // prend plusieurs centaines de millisecondes.
+  const selectProfile = useCallback(
+    async (id: ProfileId) => {
+      if (busy) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const choice = await chooseProfile(id);
+        setProfileState(choice.profile);
+        setPower(choice.power);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy],
+  );
+
   const togglePin = useCallback(() => {
     const next = !pinned;
     setPinnedState(next);
@@ -527,7 +555,7 @@ export default function App() {
   const renderTab = (index: number) => {
     switch (TAB_IDS[index]) {
       case "compare":
-        return <PhaseTable phases={phases} onReset={reset} />;
+        return <PhaseTable phases={phases} selected={profile} onReset={reset} />;
 
       case "system":
         return (
@@ -693,6 +721,16 @@ export default function App() {
           }
         />
       </div>
+
+      {profiles.length > 0 && (
+        <ProfilePicker
+          profiles={profiles}
+          selected={profile}
+          power={power}
+          busy={busy}
+          onSelect={(id) => void selectProfile(id)}
+        />
+      )}
 
       {error && (
         <div

@@ -41,6 +41,10 @@ pub struct Baseline {
     pub scheme_guid: String,
     pub boost_mode: u32,
     pub throttle_max: u32,
+    /// Absent d'un journal ecrit avant que l'EPP ne soit un levier : cette version-la ne
+    /// l'avait pas touche, il n'y a donc rien a rendre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epp: Option<u32>,
 }
 
 impl Baseline {
@@ -49,6 +53,7 @@ impl Baseline {
             scheme_guid: state.scheme_guid.clone(),
             boost_mode: state.boost_mode,
             throttle_max: state.throttle_max,
+            epp: state.epp,
         }
     }
 
@@ -56,6 +61,7 @@ impl Baseline {
         Targets {
             boost_mode: self.boost_mode,
             throttle_max: self.throttle_max,
+            epp: self.epp,
         }
     }
 }
@@ -221,9 +227,23 @@ impl<P: PowerControl> Restorer<P> {
 
         // Deja arme : la reference date de la premiere intervention et ne bouge plus.
         // La reprendre ici enregistrerait l'etat bride comme etat d'origine.
-        if matches!(self.journal.pending(), Pending::None) {
-            self.journal.arm(&Baseline::of(&state))?;
-        }
+        let baseline = match self.journal.pending() {
+            Pending::None => {
+                let baseline = Baseline::of(&state);
+                self.journal.arm(&baseline)?;
+                Some(baseline)
+            }
+            Pending::Baseline(baseline) => Some(baseline),
+            Pending::Unknown => None,
+        };
+
+        // Un levier que le profil ne fixe pas revient a sa valeur d'origine. Sans cela,
+        // passer d'un profil qui le regle a un profil qui l'ignore le laisserait en place,
+        // et la machine ne ressemblerait plus a aucun des deux.
+        let targets = Targets {
+            epp: targets.epp.or(baseline.and_then(|b| b.epp)),
+            ..targets
+        };
 
         // L'ordre compte : le journal est ecrit avant la premiere modification, jamais
         // apres. Entre les deux, le pire cas est une dette sans intervention — une
@@ -292,10 +312,12 @@ mod tests {
     }
 
     impl FakePower {
+        /// L'EPP d'origine est celle du schema Equilibre.
         fn new(boost_mode: u32, throttle_max: u32) -> Self {
             let targets = Targets {
                 boost_mode,
                 throttle_max,
+                epp: Some(33),
             };
             Self {
                 state: Mutex::new(PowerState::new(
@@ -343,6 +365,11 @@ mod tests {
             ));
             let mut state = self.state.lock().unwrap();
             if state.scheme_guid == scheme_guid {
+                // Comme powercfg : un levier absent de l'ecriture n'est pas touche.
+                let targets = Targets {
+                    epp: targets.epp.or(state.epp),
+                    ..targets
+                };
                 *state = PowerState::new(
                     state.scheme_guid.clone(),
                     state.scheme_name.clone(),
@@ -360,6 +387,98 @@ mod tests {
 
     fn capped() -> &'static Profile {
         profiles::get(ProfileId::Capped)
+    }
+
+    fn aggressive() -> &'static Profile {
+        profiles::get(ProfileId::Aggressive)
+    }
+
+    fn epp(power: &FakePower) -> Option<u32> {
+        power.state().unwrap().epp
+    }
+
+    // --- Les profils ---
+
+    #[test]
+    fn un_profil_pose_tous_ses_leviers_et_l_arret_les_rend() {
+        let r = restorer(FakePower::new(2, 100));
+
+        let state = r.engage(aggressive()).expect("profil applique");
+        assert_eq!(
+            (state.boost_mode, state.throttle_max, state.epp),
+            (0, 80, Some(60))
+        );
+        assert_eq!(state.profile, Some(ProfileId::Aggressive));
+
+        let state = r.restore().expect("restauration").expect("etat rendu");
+        assert_eq!(
+            (state.boost_mode, state.throttle_max, state.epp),
+            (2, 100, Some(33))
+        );
+    }
+
+    /// Le levier qu'un profil ne fixe pas revient a sa valeur d'origine, et non a celle
+    /// du profil precedent.
+    #[test]
+    fn changer_de_profil_rend_les_leviers_qu_il_ne_fixe_pas() {
+        let r = restorer(FakePower::new(2, 100));
+
+        r.engage(aggressive()).expect("agressif");
+        let state = r.engage(capped()).expect("leger");
+
+        assert_eq!(
+            (state.boost_mode, state.throttle_max, state.epp),
+            (0, 99, Some(33))
+        );
+        assert_eq!(state.profile, Some(ProfileId::Capped));
+    }
+
+    /// La reference reste celle d'avant le premier profil, quel que soit le nombre de
+    /// changements ensuite.
+    #[test]
+    fn changer_de_profil_ne_reecrit_pas_la_reference() {
+        let r = restorer(FakePower::new(2, 100));
+
+        r.engage(capped()).expect("leger");
+        r.engage(aggressive()).expect("agressif");
+        r.engage(capped()).expect("leger encore");
+
+        match r.journal.pending() {
+            Pending::Baseline(b) => {
+                assert_eq!((b.boost_mode, b.throttle_max, b.epp), (2, 100, Some(33)));
+            }
+            other => panic!("reference perdue : {other:?}"),
+        }
+        let state = r.restore().expect("restauration").expect("etat rendu");
+        assert_eq!(epp(&r.power), Some(33));
+        assert!(!state.optimized);
+    }
+
+    /// Un journal ecrit par une version sans EPP se relit, et sa restauration ne touche
+    /// pas un levier que cette version n'avait pas modifie.
+    #[test]
+    fn un_journal_sans_epp_ne_touche_pas_l_epp() {
+        let journal = temp_journal();
+        std::fs::write(
+            journal.path().unwrap(),
+            format!(r#"{{"schemeGuid":"{SCHEME}","boostMode":2,"throttleMax":100}}"#),
+        )
+        .unwrap();
+        // Une EPP differente de l'origine : si la restauration l'ecrivait, on le verrait.
+        let power = FakePower::new(0, 99);
+        let moved = Targets {
+            boost_mode: 0,
+            throttle_max: 99,
+            epp: Some(70),
+        };
+        power.write(SCHEME, moved).unwrap();
+        let r = Restorer::new(power, journal);
+
+        let state = r.restore().expect("restauration").expect("etat rendu");
+        assert_eq!(
+            (state.boost_mode, state.throttle_max, state.epp),
+            (2, 100, Some(70))
+        );
     }
 
     // --- La reference est prise avant l'intervention, jamais apres ---
@@ -620,12 +739,16 @@ mod tests {
             scheme_guid: SCHEME.into(),
             boost_mode: 2,
             throttle_max: 100,
+            epp: Some(33),
         })
         .expect("serialisable");
 
         assert!(raw.contains("schemeGuid"), "{raw}");
         let back: Baseline = serde_json::from_str(&raw).expect("relisible");
         assert_eq!(back.scheme_guid, SCHEME);
-        assert_eq!((back.boost_mode, back.throttle_max), (2, 100));
+        assert_eq!(
+            (back.boost_mode, back.throttle_max, back.epp),
+            (2, 100, Some(33))
+        );
     }
 }
