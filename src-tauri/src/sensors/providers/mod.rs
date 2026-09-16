@@ -3,6 +3,7 @@
 pub mod acpi;
 pub mod amd_gpu;
 pub mod core_temp;
+pub mod gpu_holders;
 pub mod hwinfo;
 pub mod libre_hw;
 pub mod nvidia;

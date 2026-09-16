@@ -80,42 +80,81 @@ flowchart TD
     lire -->|faux| plaf["plafonné<br/>turbo interdit"]
 ```
 
-## Le GPU au repos : trois états, un seul qui alerte
+## Le GPU au repos : ce que dit le badge
 
 Sur un portable, CPU et GPU partagent les mêmes caloducs. Un GPU qui consomme sans rien
 produire chauffe le die CPU **sans qu'aucune mesure CPU ne l'explique** : la température
 monte, la puissance package ne bouge pas. C'est la lecture que l'interface doit rendre
 possible.
 
-### Deux critères, parce qu'aucun ne suffit seul
+### Trois clauses, et pourquoi la fréquence n'en fait pas partie
 
-Une fréquence brute ne se juge pas. Relevé simultané, au repos :
+L'anomalie tient en une phrase, et chaque morceau en est une clause :
 
-| Carte | Fréquence | Plafond (`clocks.max.sm`) | Rapport | P-state |
+> le pilote déclare la carte inoccupée, **aucun écran ne lui est attaché**, et pourtant
+> elle se tient dans un état de performance.
+
+| Clause | Grandeur | Ce qu'elle écarte |
+|---|---|---|
+| le pilote la dit inoccupée | `GpuDriverIdle` (`GpuIdle`) | une carte qui travaille sans que `utilization.gpu` le montre |
+| aucun écran attaché | `GpuDisplayActive` | le cas **légitime** : une carte qui balaie une dalle est éveillée à bon droit |
+| état de performance | `GpuPerfStateIndex` ≤ **P5** | une carte simplement *réveillée*, y compris par notre propre sondage |
+
+Les trois sont exigées ensemble. Une seule manquante et l'énoncé ne tient plus : le badge
+se tait plutôt que de conclure sur une phrase incomplète — cas d'une carte AMD, qui ne
+publie ni P-state ni état d'affichage.
+
+Ces clauses établissent **qu'il y a** anomalie. Dire **laquelle** — un process qui tient la
+carte, ou une politique du pilote — est l'affaire de l'algorithme de décision, décrit avec
+son ordre et ses pièges dans [gpu-power-control.md](gpu-power-control.md).
+
+Relevé simultané, au repos, les deux machines :
+
+| Carte | `GpuIdle` | Écran attaché | P-state | Verdict |
 |---|---|---|---|---|
-| RTX 4080 SUPER (tour) | 210 MHz | 3105 MHz | **7 %** | **P8** |
-| RTX 2000 Ada (portable) | 2115 MHz | 3105 MHz | **68 %** | **P3** |
+| RTX 4080 SUPER (tour) | actif | **oui** | P8 | repos — deux clauses la sauvent |
+| RTX 2000 Ada (portable) | actif | **non** | P0 ou P3 | **épinglé** |
 
-Seul le rapport se compare, exactement comme `CpuMaxCorePct` rapporte la fréquence cœur au
-nominal. D'où la métrique `GpuClockMaxMhz` : sans elle, `GpuClockMhz` ne conclut rien.
+La clause d'affichage n'est pas un détail : sans elle, tout portable dont le MUX est en
+mode discret serait signalé en permanence, alors que sa carte fait exactement son travail.
 
-**Mais le plafond n'est pas celui de la carte.** Les deux annoncent 3105 MHz : une 4080
-SUPER de bureau et une RTX 2000 Ada mobile n'ont évidemment pas le même boost, et
-`clocks.max.sm` rapporte le plafond *architectural* de la génération. Le rapport reste
-discriminant sur ces deux cartes — 7 % contre 68 % — mais il s'écrase, et une carte au
-boost modeste, épinglée à son propre plafond, passerait sous un seuil posé à **50 %**.
+#### La fréquence a été retirée du verdict
 
-Le **P-state** ne souffre pas de ce défaut : le pilote le normalise carte par carte, `P0`
-au maximum et `P8` ou `P12` au repos. « Au repos sans être redescendu dans un état
-profond » est l'anomalie même, sans dénominateur à interpréter. Le seuil est à **P5**.
+Elle y a figuré, et c'était une erreur de deux façons.
 
-Les deux critères sont unis par un **OU**. Le P-state rattrape ce que le rapport
-laisserait passer ; le rapport couvre les fournisseurs qui donnent une fréquence sans
-P-state — seul NVML expose le second. Aucun des deux renseigné, le badge se tait.
+D'abord le dénominateur. Les deux cartes annoncent `clocks.max.sm = 3105 MHz` — une 4080
+SUPER de bureau et une RTX 2000 Ada mobile n'ont évidemment pas le même boost :
+`clocks.max.sm` rapporte le plafond **architectural de la génération**, pas celui de la
+carte.
 
-> Cette section a d'abord affirmé un plafond de ~2115 MHz pour la RTX 2000 Ada. C'était
-> une déduction présentée comme une mesure, et c'est elle qui avait fait croire le seuil
-> plus robuste qu'il ne l'était.
+Ensuite, et c'est rédhibitoire : sur la RTX 2000 Ada, `clocks.sm` renvoie **2115 MHz au
+MHz près en toutes circonstances**, quand `power.draw` varie bien, lui, de 17,9 à 18,5 W.
+La première est une valeur nominale recopiée par le pilote, la seconde une mesure. Le
+rapport y valait donc 68 % en permanence : « épinglé » quoi qu'il arrive — juste par
+accident sur cette machine, aveugle par construction. Uni aux autres par un **OU**, il ne
+pouvait même pas être contredit.
+
+**Une valeur qui ne varie jamais n'est pas un capteur.** Le critère s'applique avant de
+conclure quoi que ce soit : faire varier la charge, et vérifier que la grandeur bouge. Une
+télémétrie partiellement non implémentée est la règle sur portable, pas l'exception.
+
+La fréquence reste affichée sous la puissance GPU, rapportée au plafond. Elle informe,
+elle ne juge plus.
+
+> Deux corrections successives ont traversé cette section : un plafond de ~2115 MHz
+> déduit et présenté comme mesuré, puis le rapport lui-même. Elles sont consignées plutôt
+> qu'effacées — c'est le même raisonnement qui menace de se refaire.
+
+#### Une réserve qui reste ouverte
+
+Chaque appel NVML exige que la carte soit en D0 : **l'interroger la sort du RTD3**, et le
+pilote demande ensuite 30 à 60 s d'inactivité continue avant de le réarmer. Sur un
+portable, l'application entretient donc l'éveil qu'elle mesure.
+
+La clause de P-state limite les dégâts — une carte seulement réveillée par un sondage
+retombe en P8, là où une carte épinglée par une politique se tient en P0 ou P3 — mais elle
+ne referme pas la question. Voir [gpu-power-control.md](gpu-power-control.md) pour le test
+qui la tranche, et les conséquences d'architecture qui en découleraient.
 
 ### Pourquoi le décodage vidéo compte comme une charge
 
@@ -128,30 +167,35 @@ La charge retenue est le **maximum des trois** : `utilization.gpu`,
 l'actionneur : le jour où un bridage s'appuiera sur ce prédicat, brider pendant une
 lecture vidéo coûterait des images perdues.
 
-### Les trois états
+### Les badges
 
-| Charge | Fréquence / plafond | Badge | Sens |
-|---|---|---|---|
-| au-dessus du plancher | — | **en service** | la mesure ne conclut pas : une fréquence haute y est normale |
-| sous le plancher | < 50 % | **repos** | la carte est redescendue, rien à signaler |
-| sous le plancher | > 50 % | **épinglé** | **consomme sans rien produire** |
+| Badge | Couleur | Sens |
+|---|---|---|
+| **en service** | `idle` | la carte travaille — charge, ou `GpuIdle` inactif. Rien à conclure |
+| **repos** | `cool` | redescendue dans un état profond |
+| **affichage** | `idle` | éveillée pour piloter un écran : coûteux, mais légitime |
+| **épinglé** | `hot` | **consomme sans rien produire** — la note dit pourquoi |
 
 Les couleurs gardent le sens qu'elles ont pour le CPU : `hot` l'état coûteux, `cool`
-l'état économe, `idle` celui où la mesure ne permet pas de conclure. À noter que « repos »
-est ici l'état *souhaitable*, là où pour le CPU il marque l'absence de conclusion — c'est
-le badge qui change de sens, pas la couleur.
+l'état économe, `idle` celui où la mesure ne permet pas de conclure sur un gaspillage. À
+noter que « repos » est ici l'état *souhaitable*, là où pour le CPU il marque l'absence de
+conclusion — c'est le badge qui change de sens, pas la couleur.
 
 Mêmes garde-fous que pour le turbo, pour les mêmes raisons : hystérésis de deux mesures
-concordantes sur la fréquence, et deux seuils de charge (10 % / 20 %) pour ne pas osciller
+concordantes sur le verdict, et deux seuils de charge (10 % / 20 %) pour ne pas osciller
 sur le jitter du repos.
 
 ### Ce que ce badge aurait évité
 
-Les grandeurs nécessaires — fréquence et charge GPU — étaient **déjà collectées et déjà
-affichées** avant ce badge. Ce qui manquait n'était pas la donnée mais son interprétation :
-rien ne disait que leur combinaison était anormale. Un diagnostic mené à la main sur un
-portable a demandé sept échanges pour établir ce que ces trois états donnent d'un coup
-d'œil.
+Fréquence et charge GPU étaient **déjà collectées et déjà affichées** avant ce badge : ce
+qui manquait n'était pas la donnée mais son interprétation. Un diagnostic mené à la main
+sur un portable a demandé sept échanges pour établir ce que ces trois états donnent d'un
+coup d'œil.
+
+La suite de ce diagnostic a montré que ces deux grandeurs ne suffisaient pas — l'une
+d'elles n'était même pas une mesure sur la machine concernée. `GpuDisplayActive` et
+`GpuDriverIdle`, ajoutées ensuite, rendent l'énoncé vrai plutôt que vraisemblable ; les
+compteurs de mémoire par process lui donnent un coupable.
 
 ## Politique et mesure sont deux choses
 

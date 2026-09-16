@@ -15,6 +15,9 @@ export type MetricKey =
   | "gpuClockMaxMhz"
   | "gpuUtilPct"
   | "gpuPerfStateIndex"
+  | "gpuDisplayActive"
+  | "gpuDriverIdle"
+  | "gpuHolderCount"
   | "gpuDecodeUtilPct"
   | "gpuEncodeUtilPct";
 
@@ -24,10 +27,21 @@ export interface Sample {
   provider: string;
 }
 
+/** Miroir de `sensors::GpuHolder` : un process qui tient de la mémoire sur la carte. */
+export interface GpuHolder {
+  pid: number;
+  /** Absent pour un process qui ne se laisse pas ouvrir. */
+  name: string | null;
+  /** Absent quand Windows rapporte une taille impossible. */
+  dedicatedMb: number | null;
+}
+
 /** Miroir de `sensors::Reading`. */
 export interface Reading {
   values: Partial<Record<MetricKey, Sample>>;
   cpuName: string | null;
+  /** Les plus gros clients de la carte NVIDIA ; le compte complet est `gpuHolderCount`. */
+  gpuHolders: GpuHolder[];
   tsMs: number;
 }
 

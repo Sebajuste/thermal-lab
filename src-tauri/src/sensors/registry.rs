@@ -20,8 +20,8 @@
 use super::provider::Provider;
 use super::providers::{
     acpi::AcpiProvider, amd_gpu::AmdGpuProvider, core_temp::CoreTempProvider,
-    hwinfo::HwInfoProvider, libre_hw::LibreHwProvider, nvidia::NvidiaProvider,
-    perf_counters::PerfCountersProvider,
+    gpu_holders::GpuHoldersProvider, hwinfo::HwInfoProvider, libre_hw::LibreHwProvider,
+    nvidia::NvidiaProvider, perf_counters::PerfCountersProvider,
 };
 
 pub fn build() -> Vec<Box<dyn Provider>> {
@@ -32,6 +32,7 @@ pub fn build() -> Vec<Box<dyn Provider>> {
         Box::new(AmdGpuProvider::new()),
         Box::new(PerfCountersProvider::new()),
         Box::new(NvidiaProvider::new()),
+        Box::new(GpuHoldersProvider::new()),
         Box::new(AcpiProvider::new()),
     ]
 }

@@ -8,6 +8,7 @@
 //! ~16 ms de CPU chacun pour initialiser NVML, le charger, l'afficher et mourir : le
 //! poste dominant de l'application au repos, pour la meme mesure.
 
+use nvml_wrapper::bitmasks::device::ThrottleReasons;
 use nvml_wrapper::enum_wrappers::device::{Clock, PerformanceState, TemperatureSensor};
 use nvml_wrapper::Nvml;
 
@@ -25,6 +26,8 @@ const PROVIDES: &[Metric] = &[
     Metric::GpuClockMaxMhz,
     Metric::GpuUtilPct,
     Metric::GpuPerfStateIndex,
+    Metric::GpuDisplayActive,
+    Metric::GpuDriverIdle,
     Metric::GpuDecodeUtilPct,
     Metric::GpuEncodeUtilPct,
 ];
@@ -113,6 +116,16 @@ impl Provider for NvidiaProvider {
             if p != PerformanceState::Unknown {
                 out.offer(Metric::GpuPerfStateIndex, p.as_c() as f64, ID);
             }
+        }
+        if let Ok(on) = gpu.is_display_active() {
+            out.offer(Metric::GpuDisplayActive, f64::from(u8::from(on)), ID);
+        }
+        // `GpuIdle` ne dit pas que la carte consomme peu : il dit que le pilote n'a rien
+        // a lui faire executer. Sur la carte de contrepoint il est actif pendant que
+        // 18 W sont tires — c'est precisement ce qui fait l'anomalie.
+        if let Ok(reasons) = gpu.current_throttle_reasons() {
+            let idle = reasons.contains(ThrottleReasons::GPU_IDLE);
+            out.offer(Metric::GpuDriverIdle, f64::from(u8::from(idle)), ID);
         }
         if let Ok(u) = gpu.decoder_utilization() {
             out.offer(Metric::GpuDecodeUtilPct, u.utilization as f64, ID);

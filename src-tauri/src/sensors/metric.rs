@@ -38,6 +38,18 @@ pub enum Metric {
     /// le pilote carte par carte — c'est lui qui dit dans quel etat il se tient, sans
     /// dependre d'un plafond a interpreter.
     GpuPerfStateIndex,
+    /// Un ecran est-il initialise sur cette carte — 1 ou 0. C'est ce qui separe une carte
+    /// eveillee pour rien d'une carte qui fait son travail : sur une tour, ou sur un
+    /// portable dont le MUX est en mode discret, elle balaie une dalle et son eveil est
+    /// legitime.
+    GpuDisplayActive,
+    /// Le pilote declare-t-il lui-meme n'avoir rien a faire executer — 1 ou 0, depuis le
+    /// drapeau `GpuIdle` des raisons d'evenement d'horloge. Plus direct qu'une frequence
+    /// a interpreter : c'est l'affirmation du pilote, pas une deduction.
+    GpuDriverIdle,
+    /// Nombre de process qui tiennent de la memoire dediee sur la carte NVIDIA. Un seul
+    /// suffit a interdire son extinction, meme a charge nulle.
+    GpuHolderCount,
     /// Occupation du decodeur video (NVDEC). Distincte de `GpuUtilPct`, qui reste bas
     /// pendant une lecture video : c'est ce qui separe un GPU inoccupe d'un GPU qui
     /// decode.
@@ -63,6 +75,9 @@ impl Metric {
         Metric::GpuClockMaxMhz,
         Metric::GpuUtilPct,
         Metric::GpuPerfStateIndex,
+        Metric::GpuDisplayActive,
+        Metric::GpuDriverIdle,
+        Metric::GpuHolderCount,
         Metric::GpuDecodeUtilPct,
         Metric::GpuEncodeUtilPct,
     ];
@@ -78,8 +93,11 @@ impl Metric {
             | Metric::GpuDecodeUtilPct
             | Metric::GpuEncodeUtilPct => "%",
             Metric::CpuNominalMhz | Metric::GpuClockMhz | Metric::GpuClockMaxMhz => "MHz",
-            // Un indice d'etat, sans grandeur physique.
-            Metric::GpuPerfStateIndex => "",
+            // Un indice d'etat, deux booleens et un compte : aucune grandeur physique.
+            Metric::GpuPerfStateIndex
+            | Metric::GpuDisplayActive
+            | Metric::GpuDriverIdle
+            | Metric::GpuHolderCount => "",
         }
     }
 }
@@ -93,12 +111,27 @@ pub struct Sample {
     pub provider: &'static str,
 }
 
+/// Un process qui tient de la memoire sur la carte graphique.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuHolder {
+    pub pid: u32,
+    /// `None` pour un process qui ne se laisse pas ouvrir : protege, ou deja termine.
+    pub name: Option<String>,
+    /// `None` quand le compteur de Windows rapporte une valeur impossible : le process
+    /// tient bien la carte, mais on ne sait pas combien.
+    pub dedicated_mb: Option<f64>,
+}
+
 /// Le releve d'un cycle : ce que l'ensemble des fournisseurs a su mesurer.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Reading {
     pub values: BTreeMap<Metric, Sample>,
     pub cpu_name: Option<String>,
+    /// Les plus gros clients de la carte NVIDIA, du plus gros au plus petit. Le compte
+    /// complet est dans `Metric::GpuHolderCount`.
+    pub gpu_holders: Vec<GpuHolder>,
     pub ts_ms: u64,
 }
 

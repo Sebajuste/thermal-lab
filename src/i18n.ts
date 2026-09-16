@@ -49,6 +49,14 @@ const en = {
   badgeIdle: "idle",
   badgeGpuPinned: "pinned",
   badgeGpuBusy: "in use",
+  badgeGpuDisplay: "display",
+  gpuHeldBy: (who: string, others: number) =>
+    others > 0 ? `held by ${who} +${others}` : `held by ${who}`,
+  gpuNoClient: "no client — driver policy",
+  gpuCauseUnknown: "cause undetermined",
+  gpuFrozen: "frozen",
+  gpuClients: "Clients:",
+  mbUnit: " MB",
   measuredBy: (provider: string) => `Measured by ${provider}`,
 
   // Comparaison des phases
@@ -140,6 +148,14 @@ const fr: Strings = {
   badgeIdle: "repos",
   badgeGpuPinned: "épinglé",
   badgeGpuBusy: "en service",
+  badgeGpuDisplay: "affichage",
+  gpuHeldBy: (who, others) =>
+    others > 0 ? `tenue par ${who} +${others}` : `tenue par ${who}`,
+  gpuNoClient: "aucun client — politique pilote",
+  gpuCauseUnknown: "cause indéterminée",
+  gpuFrozen: "figée",
+  gpuClients: "Clients :",
+  mbUnit: " Mo",
   measuredBy: (provider) => `Mesure fournie par ${provider}`,
 
   compareHint: "Comparer sous charge stable.",

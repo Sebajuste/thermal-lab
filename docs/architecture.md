@@ -19,6 +19,7 @@ flowchart TB
         subgraph nat["Sources natives — ni pilote ni privilège"]
             pc["perf_counters"]
             nv["nvidia"]
+            gh["gpu_holders"]
             ac["acpi"]
         end
         hub -->|"probe() / sample()"| ext
@@ -51,6 +52,7 @@ celui du frontend. Voir [background-ux.md](background-ux.md).
 | `phases.rs` | les moyennes par état du bridage, tenues au rythme de la mesure |
 | `tools.rs` | les outils tiers : où ils sont, s'ils tournent, comment les lancer |
 | `power.rs` | lecture registre + écriture `powercfg` du schéma actif |
+| `restore.rs` | la garantie d'arrêt : journal des valeurs d'avant, et restauration |
 | `sensors/metric.rs` | les grandeurs mesurables, et le relevé agrégé |
 | `sensors/provider.rs` | le contrat que respecte toute source |
 | `sensors/registry.rs` | quels fournisseurs, dans quel ordre de priorité |
