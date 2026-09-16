@@ -119,6 +119,11 @@ impl Journal {
         Self::at(dir.join(FILE))
     }
 
+    /// Le journal tel qu'il est sur le disque, pour le diagnostic.
+    pub fn raw(&self) -> Option<String> {
+        fs::read_to_string(self.path.as_ref()?).ok()
+    }
+
     /// Aucun endroit ou ecrire. L'interrupteur se refusera plutot que de promettre.
     pub fn nowhere() -> Self {
         Self { path: None }

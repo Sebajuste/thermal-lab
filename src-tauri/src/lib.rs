@@ -91,7 +91,10 @@ fn read_capabilities(hub: tauri::State<'_, SensorHub>) -> Capabilities {
 
 /// Relit l'etat d'alimentation et le resynchronise partout : le schema peut aussi
 /// changer depuis Windows, sans passer par nous.
-#[tauri::command]
+///
+/// Hors du thread principal : cinq appels a `powercfg`, une centaine de millisecondes,
+/// sondes toutes les cinq secondes panneau ouvert.
+#[tauri::command(async)]
 fn power_state(app: AppHandle) -> Result<PowerState, String> {
     let state = power::state()?;
     sync_power(&app, &state);
@@ -177,6 +180,34 @@ fn set_autostart(app: AppHandle, on: bool) -> Result<bool, String> {
 #[tauri::command]
 fn set_auto_update(app: AppHandle, on: bool) -> Result<bool, String> {
     Ok(app.state::<Settings>().set_auto_update(on)?.auto_update)
+}
+
+/// Tout ce qu'il faut pour comprendre une machine qu'on ne peut pas interroger soi-meme,
+/// d'un seul geste : un poste gere n'offre parfois ni console, ni copier-coller.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Diagnosis {
+    power: power::PowerDiagnosis,
+    /// Le journal de restauration tel qu'il est sur le disque, s'il existe.
+    restore_journal: Option<String>,
+    gpu_clamp: ClampStatus,
+    /// Un verrou GPU est consigne comme pose.
+    gpu_clamp_journal: bool,
+    reading: Reading,
+}
+
+#[tauri::command(async)]
+fn diagnose(app: AppHandle) -> Result<Diagnosis, String> {
+    let dir = app.path().app_config_dir().ok();
+    Ok(Diagnosis {
+        power: power::diagnose()?,
+        restore_journal: dir.as_deref().and_then(|d| Journal::in_dir(d).raw()),
+        gpu_clamp: app.state::<Arc<GpuClamp>>().status(),
+        gpu_clamp_journal: dir
+            .as_deref()
+            .is_some_and(|d| ClampJournal::in_dir(d).pending()),
+        reading: app.state::<SensorHub>().latest(),
+    })
 }
 
 #[tauri::command]
@@ -396,6 +427,7 @@ pub fn run() {
             set_profile,
             gpu_clamp_state,
             set_gpu_clamp,
+            diagnose,
             update::check_update,
             update::install_update
         ])

@@ -234,7 +234,7 @@ impl ClampJournal {
         Self { path: Some(path) }
     }
 
-    fn pending(&self) -> bool {
+    pub fn pending(&self) -> bool {
         self.path.as_ref().is_some_and(|p| p.exists())
     }
 

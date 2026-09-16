@@ -1,5 +1,6 @@
 import type { PowerState, ProfileId, ProfileInfo } from "../api";
 import { t } from "../i18n";
+import { mismatches } from "../levers";
 
 interface Props {
   profiles: ProfileInfo[];
@@ -35,6 +36,9 @@ function summary(p: ProfileInfo): string {
 export default function ProfilePicker({ profiles, selected, power, busy, onSelect }: Props) {
   const current = profiles.find((p) => p.id === selected);
   const external = power?.optimized === true && power.profile === null;
+  // Ce qui sépare la machine du profil choisi : le premier écart s'affiche, tous au
+  // survol. Sans lui, « bridage externe » ne dit pas quoi regarder.
+  const gaps = external && current && power ? mismatches(current, power) : [];
 
   return (
     <div className="profiles" title={t.profileHint}>
@@ -60,8 +64,17 @@ export default function ProfilePicker({ profiles, selected, power, busy, onSelec
           );
         })}
       </div>
-      <span className={`profile-note ${external ? "warn" : ""}`}>
-        {external ? t.externalCap : current ? summary(current) : ""}
+      <span
+        className={`profile-note ${external ? "warn" : ""}`}
+        title={gaps.length > 0 ? [t.externalCap, ...gaps].join("\n") : undefined}
+      >
+        {external
+          ? gaps.length > 0
+            ? `${t.externalCapShort} · ${gaps[0]}${gaps.length > 1 ? ` +${gaps.length - 1}` : ""}`
+            : t.externalCap
+          : current
+            ? summary(current)
+            : ""}
       </span>
     </div>
   );

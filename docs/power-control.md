@@ -31,24 +31,52 @@ C'est exactement le levier des « optimiseurs » du commerce. Aucune technologie
 propriétaire n'est en jeu : le produit qui a motivé ce POC créait simplement un schéma
 d'alimentation nommé avec ces deux valeurs.
 
-## Lecture par le registre et par `powercfg /qh`, écriture par powercfg
+## Lecture par `powercfg /qh` et par la stratégie, écriture par powercfg
 
-**Lecture de l'EPP.** Par `powercfg /qh`, qui affiche aussi les réglages masqués. Le
-registre ne suffit pas : la clé est absente tant que personne ne l'a écrite, la valeur
-vient alors de `DefaultPowerSchemeValues` — propre à chaque schéma, et absente pour un
-schéma créé par l'utilisateur. La sortie est localisée, pas ses valeurs : minimum,
-maximum, incrément, index secteur, index batterie, tous en `0x` sur huit chiffres.
-L'index secteur est l'avant-dernier. Une vingtaine de millisecondes.
+**Lecture.** Les cinq leviers passent par la même voie : `powercfg /qh`, qui affiche aussi
+les réglages masqués — `/query` ne les montre pas, et les outils tiers les masquent. Le
+registre du schéma ne suffit pas : sa clé est absente tant que personne ne l'a écrite, et
+la valeur vient alors de `DefaultPowerSchemeValues`, propre à chaque schéma et absente
+pour un schéma créé par l'utilisateur.
 
-**Lecture.** `powercfg /query` n'affiche rien pour ces réglages quand leur attribut est
-masqué — et les outils tiers les masquent. On lit donc directement :
+La sortie est localisée, pas ses valeurs : minimum, maximum et incrément pour un réglage à
+plage, puis index secteur et index batterie, tous en `0x` sur huit chiffres. Les deux
+derniers sont ceux qu'on cherche. Une vingtaine de millisecondes par levier, cent pour les
+cinq ; le sous-groupe entier en une fois en coûte 800. `power_state` et `diagnose`
+tournent donc hors du thread principal.
+
+**Une stratégie de groupe prime.** Une valeur déposée sous
 
 ```
-HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes
-  \<guid du schéma>\54533251-…\<guid du réglage>\ACSettingIndex
+HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings\<guid du réglage>
+  ACSettingIndex, DCSettingIndex
 ```
 
-Clé absente = valeur par défaut de Windows (`2` pour le boost, `100` pour le plafond).
+s'applique quoi que dise le schéma, et `powercfg` ne la change pas. La valeur lue est donc,
+dans l'ordre : la stratégie, sinon `powercfg /qh`, sinon la clé du schéma, sinon le défaut
+de Windows. Les leviers imposés sont remontés à l'interface (`policyLocked`) : un profil qui
+en dépend ne peut pas s'appliquer, et le panneau le dit au lieu de répéter « bridage
+externe ».
+
+## Le diagnostic
+
+Onglet Système, bouton « Relever ». Il est pensé pour un poste géré, où l'on n'a ni console,
+ni copier-coller vers l'extérieur : tout ce que la machine dit d'elle-même tient sur un
+écran, et se photographie.
+
+- le schéma actif, l'élévation, un schéma imposé par stratégie ;
+- les cinq leviers, **vus par chaque source** — `powercfg`, clé du schéma, stratégie — en
+  regard des valeurs du profil choisi. Un levier dont la valeur appliquée diffère est
+  coloré ; une valeur imposée par stratégie l'est en rouge ;
+- le journal de restauration, tel qu'il est sur le disque ;
+- l'état du GPU et du bridage GPU, journal compris.
+
+« Copier » met le même relevé en texte dans le presse-papiers.
+
+Au survol de « bridage externe », le sélecteur liste les écarts avec le profil choisi, et
+en affiche le premier en clair. C'est ce qui manquait au premier essai sur le portable de
+référence : l'application savait que la machine ne ressemblait à aucun profil, pas
+pourquoi, et le poste n'offrait aucun moyen de le demander autrement.
 
 **Écriture.** Par `powercfg`, qui passe par l'API power privilégiée et propage au système.
 
