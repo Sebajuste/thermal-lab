@@ -1,14 +1,17 @@
-# Garde-fou sur la branche de travail.
+# Garde-fou avant que `main` ne bouge.
 #
-# Sans lui, rien ne verifie `develop` : les tests ne tourneraient qu'au moment de
-# publier, et une regression se decouvrirait pendant une release plutot qu'avant.
+# Sur les pull requests seulement, et non a chaque poussee : `develop` recoit des
+# commits intermediaires qu'on ne cherche pas a valider un par un, et compiler Rust
+# pendant trois minutes pour un commit qui sera corrige dix minutes plus tard n'apprend
+# rien. Ce qui compte, c'est que rien ne passe dans `main` sans etre verifie — et la
+# protection de branche exige justement ce statut.
 name: ci
 
 on:
-  push:
-    branches: [develop]
   pull_request:
     branches: [main, develop]
+  # Pour rejouer la verification sans ouvrir de pull request.
+  workflow_dispatch:
 
 jobs:
   check:

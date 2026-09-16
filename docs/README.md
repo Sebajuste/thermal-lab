@@ -13,9 +13,11 @@ avec bascule en direct pour comparer à charge identique.
 | [measurement.md](measurement.md) | savoir ce que valent les chiffres affichés |
 | [third-party-tools.md](third-party-tools.md) | détecter, situer et lancer les outils tiers |
 | [power-control.md](power-control.md) | le mécanisme de bridage et ses pièges |
+| [gpu-power-control.md](gpu-power-control.md) | le côté GPU : ce qu'on peut lire, ce qu'on peut agir — recommandations |
 | [distribution.md](distribution.md) | ce qui bloque hors de la machine de dev |
 | [releases.md](releases.md) | publier une version, et la faire arriver chez l'utilisateur |
 | [development.md](development.md) | commandes, tests, dépannage |
+| [camomile.md](camomile.md) | l'enquête à l'origine du projet : ce qui est prouvé, ce qui ne l'est pas |
 
 ## Diagrammes
 
@@ -41,7 +43,8 @@ constaté plutôt que supposé.
 
 Fonctionnel : lecture des capteurs (6 fournisseurs), bascule du bridage, comparaison de
 phases, modèle de capacités, mode résident dans la zone de notification, détection et
-lancement des outils tiers. 49 tests, aucun avertissement de compilation.
+lancement des outils tiers. La CI tient le reste : format, clippy sans avertissement,
+tests, et build du frontend à chaque pull request.
 
 Non couvert, par ordre d'intérêt :
 
@@ -52,7 +55,7 @@ Non couvert, par ordre d'intérêt :
 3. **Multi-GPU** — `providers/nvidia.rs` et `providers/amd_gpu.rs` ne lisent chacun que
    la première carte, et le rang unique du registre ne sait pas arbitrer entre elles sur
    une machine mixte. Côté AMD, tout passe par LibreHardwareMonitor : il n'existe pas
-   d'équivalent de `nvidia-smi` livré avec le pilote, seul l'ADLX natif s'en approcherait.
+   d'équivalent de NVML livré avec le pilote, seul l'ADLX natif s'en approcherait.
 4. **Persistance des sessions de mesure** — les moyennes survivent au masquage du
    panneau, pas à la sortie de l'application.
 

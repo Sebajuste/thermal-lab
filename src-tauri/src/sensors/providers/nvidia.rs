@@ -1,52 +1,48 @@
-//! Pilote GPU NVIDIA — `nvidia-smi`.
+//! Pilote GPU NVIDIA — NVML.
 //!
-//! L'outil est installe avec le pilote graphique : rien de plus a fournir, et aucun
-//! privilege requis. On paie le cout d'un processus par sondage, negligeable a 1 Hz, en
-//! echange d'une interface stable et documentee.
+//! `nvml.dll` est livree avec le pilote graphique : rien de plus a fournir, et aucun
+//! privilege requis. La bibliotheque est chargee une fois, a l'etablissement, puis
+//! interrogee par appel direct — un releve coute quelques microsecondes.
+//!
+//! La version precedente lancait `nvidia-smi` a chaque cycle. Un processus par seconde,
+//! ~16 ms de CPU chacun pour initialiser NVML, le charger, l'afficher et mourir : le
+//! poste dominant de l'application au repos, pour la meme mesure.
 
-use std::os::windows::process::CommandExt;
-use std::process::Command;
+use nvml_wrapper::bitmasks::device::ThrottleReasons;
+use nvml_wrapper::enum_wrappers::device::{Clock, PerformanceState, TemperatureSensor};
+use nvml_wrapper::Nvml;
 
 use crate::sensors::metric::{Metric, Reading};
 use crate::sensors::provider::{
     ProbeContext, ProbeState, Provider, ProviderInfo, ProviderKind, Sampled,
 };
 
-const ID: &str = "nvidia-smi";
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const ID: &str = "nvidia";
 
-const QUERY: &str = "--query-gpu=temperature.gpu,power.draw,clocks.sm,utilization.gpu";
-const FORMAT: &str = "--format=csv,noheader,nounits";
-
-/// L'ordre des colonnes suit celui de `QUERY`.
-const COLUMNS: [Metric; 4] = [
+const PROVIDES: &[Metric] = &[
     Metric::GpuTempC,
     Metric::GpuPowerW,
     Metric::GpuClockMhz,
+    Metric::GpuClockMaxMhz,
     Metric::GpuUtilPct,
+    Metric::GpuPerfStateIndex,
+    Metric::GpuDisplayActive,
+    Metric::GpuDriverIdle,
+    Metric::GpuDecodeUtilPct,
+    Metric::GpuEncodeUtilPct,
 ];
 
-const PROVIDES: &[Metric] = &COLUMNS;
+/// NVML rend la puissance en milliwatts.
+const MILLIWATTS_PER_WATT: f64 = 1000.0;
 
 #[derive(Default)]
 pub struct NvidiaProvider {
-    available: bool,
+    nvml: Option<Nvml>,
 }
 
 impl NvidiaProvider {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    fn query() -> Option<String> {
-        let out = Command::new("nvidia-smi")
-            .args([QUERY, FORMAT])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .ok()?;
-        out.status
-            .success()
-            .then(|| String::from_utf8_lossy(&out.stdout).to_string())
     }
 }
 
@@ -54,7 +50,7 @@ impl Provider for NvidiaProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             id: ID,
-            name: "NVIDIA (nvidia-smi)",
+            name: "NVIDIA (NVML)",
             kind: ProviderKind::Builtin,
             provides: PROVIDES,
             url: None,
@@ -62,46 +58,106 @@ impl Provider for NvidiaProvider {
     }
 
     fn probe(&mut self, _ctx: &ProbeContext<'_>) -> ProbeState {
-        match Self::query() {
-            Some(text) if text.lines().next().is_some_and(|l| l.contains(',')) => {
-                self.available = true;
+        self.nvml = None;
+
+        let Ok(nvml) = Nvml::init() else {
+            return ProbeState::unavailable_only(crate::t!(
+                "no NVIDIA GPU, or driver missing",
+                "aucun GPU NVIDIA, ou pilote absent"
+            ));
+        };
+
+        // Une bibliotheque chargee ne garantit pas une carte : un pilote laisse en place
+        // apres retrait de la carte s'initialise encore, et ne compte aucun peripherique.
+        match nvml.device_count() {
+            Ok(0) | Err(_) => ProbeState::unavailable_only(crate::t!(
+                "no NVIDIA GPU, or driver missing",
+                "aucun GPU NVIDIA, ou pilote absent"
+            )),
+            Ok(_) => {
+                self.nvml = Some(nvml);
                 ProbeState::Ready
-            }
-            Some(_) => ProbeState::Failed {
-                error: crate::t!(
-                    "nvidia-smi answered in an unexpected format",
-                    "nvidia-smi a repondu un format inattendu"
-                )
-                .into(),
-            },
-            None => {
-                self.available = false;
-                ProbeState::unavailable_only(crate::t!(
-                    "no NVIDIA GPU, or driver missing",
-                    "aucun GPU NVIDIA, ou pilote absent"
-                ))
             }
         }
     }
 
     fn sample(&mut self, out: &mut Reading) -> Sampled {
-        if !self.available {
-            return Sampled::Lost;
-        }
-        let Some(text) = Self::query() else {
+        let Some(nvml) = &self.nvml else {
             return Sampled::Lost;
         };
-        // Premier GPU uniquement : le POC ne gere pas le multi-carte.
-        let Some(line) = text.lines().next() else {
+        // Premier GPU uniquement : le POC ne gere pas le multi-carte. La poignee n'est
+        // pas retenue entre deux cycles — elle emprunte a `nvml`, et la resoudre par
+        // index est une recherche en table, pas un appel au pilote.
+        let Ok(gpu) = nvml.device_by_index(0) else {
             return Sampled::Lost;
         };
 
-        for (metric, field) in COLUMNS.iter().zip(line.split(',')) {
-            if let Ok(v) = field.trim().parse::<f64>() {
-                out.offer(*metric, v, ID);
+        // Chaque grandeur est facultative : une carte sans capteur de puissance repond
+        // quand meme, et une seule absence ne vaut pas une source perdue.
+        if let Ok(t) = gpu.temperature(TemperatureSensor::Gpu) {
+            out.offer(Metric::GpuTempC, t as f64, ID);
+        }
+        if let Ok(mw) = gpu.power_usage() {
+            out.offer(Metric::GpuPowerW, mw as f64 / MILLIWATTS_PER_WATT, ID);
+        }
+        if let Ok(mhz) = gpu.clock_info(Clock::SM) {
+            out.offer(Metric::GpuClockMhz, mhz as f64, ID);
+        }
+        if let Ok(mhz) = gpu.max_clock_info(Clock::SM) {
+            out.offer(Metric::GpuClockMaxMhz, mhz as f64, ID);
+        }
+        if let Ok(u) = gpu.utilization_rates() {
+            out.offer(Metric::GpuUtilPct, u.gpu as f64, ID);
+        }
+        // `Unknown` n'est pas un indice : NVML l'encode a 32, valeur qui se rangerait
+        // dans la metrique comme un etat tres repose — l'inverse exact de ce qu'elle
+        // signifie. On ne publie rien plutot qu'un faux.
+        if let Ok(p) = gpu.performance_state() {
+            if p != PerformanceState::Unknown {
+                out.offer(Metric::GpuPerfStateIndex, p.as_c() as f64, ID);
             }
+        }
+        if let Ok(on) = gpu.is_display_active() {
+            out.offer(Metric::GpuDisplayActive, f64::from(u8::from(on)), ID);
+        }
+        // `GpuIdle` ne dit pas que la carte consomme peu : il dit que le pilote n'a rien
+        // a lui faire executer. Sur la carte de contrepoint il est actif pendant que
+        // 18 W sont tires — c'est precisement ce qui fait l'anomalie.
+        if let Ok(reasons) = gpu.current_throttle_reasons() {
+            let idle = reasons.contains(ThrottleReasons::GPU_IDLE);
+            out.offer(Metric::GpuDriverIdle, f64::from(u8::from(idle)), ID);
+        }
+        if let Ok(u) = gpu.decoder_utilization() {
+            out.offer(Metric::GpuDecodeUtilPct, u.utilization as f64, ID);
+        }
+        if let Ok(u) = gpu.encoder_utilization() {
+            out.offer(Metric::GpuEncodeUtilPct, u.utilization as f64, ID);
         }
 
         Sampled::Answered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nvml_wrapper::enum_wrappers::device::PerformanceState;
+
+    /// Lit la carte reelle, sans rien ecrire : les etats de performance qu'elle declare,
+    /// et la plage d'horloge de chacun. C'est ce que le bridage au repos vise.
+    /// `cargo test pstate_clock_ranges -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pstate_clock_ranges() {
+        let nvml = Nvml::init().expect("NVML");
+        let gpu = nvml.device_by_index(0).expect("carte 0");
+        println!("carte : {:?}", gpu.name());
+        println!("etat  : {:?}", gpu.performance_state());
+        let states = gpu.supported_performance_states().expect("etats");
+        for p in states.iter().filter(|p| **p != PerformanceState::Unknown) {
+            let g = gpu.min_max_clock_of_pstate(Clock::Graphics, *p);
+            let m = gpu.min_max_clock_of_pstate(Clock::Memory, *p);
+            println!("P{:<2} graphique {:?}  memoire {:?}", p.as_c(), g, m);
+        }
     }
 }

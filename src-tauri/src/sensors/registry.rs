@@ -9,10 +9,10 @@
 //! 1. les outils a pilote noyau, seuls a lire les registres MSR (temperature de die,
 //!    puissance package), Core Temp avant HWiNFO car il ne demande aucun reglage ;
 //! 2. le GPU AMD via LibreHardwareMonitor, seule source de ses grandeurs ;
-//! 3. les compteurs Windows et `nvidia-smi`, qui ne recouvrent pas les precedents ;
+//! 3. les compteurs Windows et NVML, qui ne recouvrent pas les precedents ;
 //! 4. la zone ACPI, qui ne mesure pas le CPU et n'alimente qu'une metrique distincte.
 //!
-//! `amd-gpu` passe avant `nvidia-smi` par contrainte de rang — les sources externes
+//! `amd-gpu` passe avant `nvidia` par contrainte de rang — les sources externes
 //! precedent les integrees — et non parce qu'elle serait plus fidele. Les deux ne se
 //! disputent les memes grandeurs que sur une machine melant iGPU Radeon et carte NVIDIA,
 //! cas que ce rang unique ne sait pas arbitrer.
@@ -20,8 +20,8 @@
 use super::provider::Provider;
 use super::providers::{
     acpi::AcpiProvider, amd_gpu::AmdGpuProvider, core_temp::CoreTempProvider,
-    hwinfo::HwInfoProvider, libre_hw::LibreHwProvider, nvidia::NvidiaProvider,
-    perf_counters::PerfCountersProvider,
+    gpu_holders::GpuHoldersProvider, hwinfo::HwInfoProvider, libre_hw::LibreHwProvider,
+    nvidia::NvidiaProvider, perf_counters::PerfCountersProvider,
 };
 
 pub fn build() -> Vec<Box<dyn Provider>> {
@@ -32,6 +32,7 @@ pub fn build() -> Vec<Box<dyn Provider>> {
         Box::new(AmdGpuProvider::new()),
         Box::new(PerfCountersProvider::new()),
         Box::new(NvidiaProvider::new()),
+        Box::new(GpuHoldersProvider::new()),
         Box::new(AcpiProvider::new()),
     ]
 }

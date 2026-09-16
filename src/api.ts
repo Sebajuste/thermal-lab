@@ -12,7 +12,14 @@ export type MetricKey =
   | "gpuTempC"
   | "gpuPowerW"
   | "gpuClockMhz"
-  | "gpuUtilPct";
+  | "gpuClockMaxMhz"
+  | "gpuUtilPct"
+  | "gpuPerfStateIndex"
+  | "gpuDisplayActive"
+  | "gpuDriverIdle"
+  | "gpuHolderCount"
+  | "gpuDecodeUtilPct"
+  | "gpuEncodeUtilPct";
 
 /** Une valeur et le fournisseur qui l'a produite. */
 export interface Sample {
@@ -20,10 +27,21 @@ export interface Sample {
   provider: string;
 }
 
+/** Miroir de `sensors::GpuHolder` : un process qui tient de la mémoire sur la carte. */
+export interface GpuHolder {
+  pid: number;
+  /** Absent pour un process qui ne se laisse pas ouvrir. */
+  name: string | null;
+  /** Absent quand Windows rapporte une taille impossible. */
+  dedicatedMb: number | null;
+}
+
 /** Miroir de `sensors::Reading`. */
 export interface Reading {
   values: Partial<Record<MetricKey, Sample>>;
   cpuName: string | null;
+  /** Les plus gros clients de la carte NVIDIA ; le compte complet est `gpuHolderCount`. */
+  gpuHolders: GpuHolder[];
   tsMs: number;
 }
 
@@ -72,13 +90,27 @@ export interface Capabilities {
   powerBlockedReason: string | null;
 }
 
+/** Miroir de `profiles::ProfileId`. */
+export type ProfileId = "capped" | "aggressive";
+
+/** Miroir de `profiles::Nature` : un arbitrage, ou une suppression de gaspillage. */
+export type Nature = "tradeoff" | "waste";
+
 /** Miroir de `power::PowerState`. */
 export interface PowerState {
   schemeGuid: string;
   schemeName: string;
   boostMode: number;
   throttleMax: number;
+  /** Préférence d'énergie de Speed Shift ; `null` si illisible. */
+  epp: number | null;
+  /** Les mêmes leviers pour la classe 1 : les cœurs P d'un processeur hybride. */
+  throttleMax1: number | null;
+  epp1: number | null;
+  /** Quelque chose bride la machine : l'état de l'interrupteur principal. */
   optimized: boolean;
+  /** Le profil connu que les valeurs relues désignent ; `null` libre ou bridage tiers. */
+  profile: ProfileId | null;
   elevated: boolean;
 }
 
@@ -105,20 +137,60 @@ export interface PhaseSnapshot {
   seconds: number;
 }
 
+/** Miroir de `phases::PhaseKey` : la référence, un profil, ou un bridage inconnu. */
+export type PhaseKey = "free" | "custom" | ProfileId;
+
+/** Miroir de `phases::PhaseEntry`. */
+export interface PhaseEntry extends PhaseSnapshot {
+  key: PhaseKey;
+  /** `null` pour la phase libre, qui est la référence. */
+  nature: Nature | null;
+}
+
 /** Miroir de `phases::PhasesSnapshot`. */
 export interface PhasesSnapshot {
-  optimized: PhaseSnapshot;
-  free: PhaseSnapshot;
+  /** La phase qu'alimentent les relevés en ce moment. */
+  current: PhaseKey;
+  /** La phase libre et chaque profil, toujours ; la personnalisée si elle a existé. */
+  phases: PhaseEntry[];
 }
+
+export const phaseOf = (p: PhasesSnapshot | null, key: PhaseKey): PhaseEntry | undefined =>
+  p?.phases.find((e) => e.key === key);
 
 /** Ce que l'interface sait de son propre châssis. */
 export interface UiState {
   pinned: boolean;
+  /** Ouverture au montage : l'interface est chargée même quand le panneau démarre replié. */
+  panelVisible: boolean;
   autostart: boolean;
   /** Mise à jour sans intervention : cochée, l'application se remplace elle-même. */
   autoUpdate: boolean;
   /** Celle du paquet installé, celle que la mise à jour compare. */
   version: string;
+  /** Le profil que l'interrupteur applique : une préférence, pas l'état de la machine. */
+  profile: ProfileId;
+  /** Les profils proposés, dans l'ordre de présentation. */
+  profiles: ProfileInfo[];
+}
+
+/** Miroir de `profiles::ProfileInfo`. */
+export interface ProfileInfo {
+  id: ProfileId;
+  nature: Nature;
+  boostMode: number;
+  throttleMax: number;
+  /** `null` : le profil ne fixe pas ce levier, il reste à sa valeur d'origine. */
+  epp: number | null;
+  /** Classe 1, les cœurs P ; même convention. */
+  throttleMax1: number | null;
+  epp1: number | null;
+}
+
+/** Miroir de `ProfileChoice` : ce qui a été enregistré, et la machine ensuite. */
+export interface ProfileChoice {
+  profile: ProfileId;
+  power: PowerState;
 }
 
 /** Miroir de `update::UpdateInfo`. */
@@ -150,6 +222,25 @@ export const setAutostart = (on: boolean) => invoke<boolean>("set_autostart", { 
 
 /** Rend l'état réellement enregistré : une écriture refusée décoche la case. */
 export const setAutoUpdate = (on: boolean) => invoke<boolean>("set_auto_update", { on });
+
+/** Miroir de `gpu_clamp::ClampStatus`. */
+export interface GpuClampStatus {
+  /** L'utilisateur l'a demandé. */
+  enabled: boolean;
+  /** Un verrou d'horloge est en place en ce moment. */
+  clamped: boolean;
+  /** Pourquoi il ne sera pas posé, tant que l'option n'est pas recochée. */
+  unsupported: string | null;
+  error: string | null;
+}
+
+export const readGpuClamp = () => invoke<GpuClampStatus>("gpu_clamp_state");
+
+/** Rend l'état du bridage : décocher relâche sur-le-champ. */
+export const setGpuClamp = (on: boolean) => invoke<GpuClampStatus>("set_gpu_clamp", { on });
+
+/** Enregistre le profil, et l'applique aussitôt si l'interrupteur est allumé. */
+export const chooseProfile = (id: ProfileId) => invoke<ProfileChoice>("set_profile", { id });
 
 /** Miroir de `update::Progress`, poussé par l'événement `update-progress`. */
 export interface UpdateProgress {

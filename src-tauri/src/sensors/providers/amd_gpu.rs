@@ -1,6 +1,6 @@
 //! Pilote GPU AMD/Radeon — capteurs de LibreHardwareMonitor.
 //!
-//! AMD n'a pas d'equivalent de `nvidia-smi` livre avec le pilote graphique : la seule
+//! AMD n'a pas d'equivalent de NVML livre avec le pilote graphique : la seule
 //! voie sans SDK natif passe par LibreHardwareMonitor, qui publie les capteurs de la
 //! carte sous les identifiants `/gpu-amd/<n>/...` (`/amdgpu/<n>/...` sur
 //! OpenHardwareMonitor). Meme source que `libre_hw`, donc, mais fournisseur distinct :

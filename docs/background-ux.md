@@ -177,6 +177,37 @@ L'accumulation vit donc dans `phases.rs`, alimentée par le thread d'échantillo
 point d'accroche `SensorHub::start(period, on_reading)`. Le frontend ne fait plus que lire
 un instantané. Le même point d'accroche sert à rafraîchir l'infobulle.
 
+## Ne pas mesurer pour personne
+
+Cette indépendance a un revers : rien n'obligeait plus la boucle à ralentir quand la
+fenêtre disparaissait. Elle mesurait à 1 Hz en permanence, et le frontend sondait à ses
+côtés — appels, rendu React, réallocation de l'historique — devant une fenêtre que
+personne ne regardait.
+
+`flyout::show` et `flyout::hide` règlent désormais la cadence : `ACTIVE_PERIOD` ouvert,
+`IDLE_PERIOD` replié. Le même appel émet `panel-visibility`, sur lequel le frontend gèle
+ou reprend ses sondages — un seul signal pour les deux côtés, qui ne peuvent donc pas
+diverger. Le `Condvar` du hub compte autant que sa cadence : sans lui, le panneau
+s'ouvrirait sur un relevé vieux de cinq secondes.
+
+Mesuré sur la compilation de développement, arborescence de processus complète : **0,072 %
+du CPU panneau ouvert, 0,0085 % replié**. C'est le second état qui dure.
+
+Deux enseignements de cette passe, contre-intuitifs tous les deux :
+
+- **le coût n'était pas où on le croyait.** `nvidia-smi`, relancé en processus à chaque
+  cycle, coûtait 16 ms — remplacé par NVML, chargé une fois, il coûte 2 µs. Mais la
+  requête WMI des compteurs de performance bloque 300 ms par cycle, pour 2 ms de CPU
+  seulement : c'est de l'attente, pas du calcul. Le CPU réellement consommé était dans le
+  webview ;
+- **`listen()` ne fonctionnait pas.** Aucun fichier de capacité n'était déclaré, donc le
+  cœur Tauri refusait `core:event:listen` — silencieusement, dans une promesse rejetée que
+  personne n'attrapait. Les abonnements `power-changed` et `app-error` n'avaient jamais
+  rien reçu ; le premier était couvert par un sondage, le second laissait les erreurs du
+  menu de l'icône sans destination. `capabilities/default.json` accorde `core:event:default`,
+  et rien d'autre : tout le reste du panneau passe par des commandes de l'application,
+  qui n'ont besoin d'aucune permission.
+
 Corollaire à garder en tête : **tout ce qui doit survivre au masquage du panneau
 appartient au Rust.** L'historique des courbes, lui, est resté côté React — il n'a de sens
 que sous les yeux de quelqu'un.
