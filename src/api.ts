@@ -112,7 +112,41 @@ export interface PowerState {
   /** Le profil connu que les valeurs relues désignent ; `null` libre ou bridage tiers. */
   profile: ProfileId | null;
   elevated: boolean;
+  /** Les leviers, par alias `powercfg`, qu'une stratégie de groupe impose. */
+  policyLocked: string[];
 }
+
+/** Miroir de `power::LeverReading` : un levier tel que chaque source le voit. */
+export interface LeverReading {
+  name: string;
+  schemeAc: number | null;
+  schemeDc: number | null;
+  registryAc: number | null;
+  registryDc: number | null;
+  policyAc: number | null;
+  policyDc: number | null;
+}
+
+/** Miroir de `power::PowerDiagnosis`. */
+export interface PowerDiagnosis {
+  schemeGuid: string;
+  schemeName: string;
+  elevated: boolean;
+  policyScheme: string | null;
+  levers: LeverReading[];
+}
+
+/** Miroir de `Diagnosis`, côté Rust. */
+export interface Diagnosis {
+  power: PowerDiagnosis;
+  restoreJournal: string | null;
+  gpuClamp: GpuClampStatus;
+  gpuClampJournal: boolean;
+  reading: Reading;
+}
+
+/** Relève tout d'un coup ; une centaine de millisecondes. */
+export const runDiagnosis = () => invoke<Diagnosis>("diagnose");
 
 /** Accès à une mesure, indifférent au fournisseur qui l'a produite. */
 export const val = (r: Reading | null, m: MetricKey): number | null =>

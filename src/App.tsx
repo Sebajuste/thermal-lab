@@ -33,6 +33,7 @@ import {
 import { t } from "./i18n";
 import Icon from "./components/Icon";
 import MetricCard, { type Badge } from "./components/MetricCard";
+import DiagnosticPanel from "./components/DiagnosticPanel";
 import PhaseTable from "./components/PhaseTable";
 import ProfilePicker from "./components/ProfilePicker";
 import ProvidersPanel from "./components/ProvidersPanel";
@@ -616,6 +617,8 @@ export default function App() {
                 </p>
               )}
             </section>
+
+            <DiagnosticPanel profile={profiles.find((p) => p.id === profile)} />
 
             <section className="panel">
               <h2>{t.application}</h2>
