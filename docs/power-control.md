@@ -124,6 +124,11 @@ Trois conséquences à garder en tête :
   introuvable, l'interrupteur renvoie une erreur plutôt que de promettre un retour en
   arrière qu'il ne pourrait pas tenir.
 
+**Rendre n'est pas oublier.** La position de l'interrupteur est retenue dans
+`settings.json` (`optimize`) : au lancement suivant, une fois la dette soldée, le profil
+choisi est réappliqué si l'interrupteur était allumé — et seulement si l'application est
+élevée. L'arrêt rend la machine ; il ne touche pas à la préférence.
+
 Une seconde pression sur l'interrupteur n'écrase pas la référence : elle date de la
 première intervention, sinon l'état bridé s'enregistrerait comme état d'origine.
 

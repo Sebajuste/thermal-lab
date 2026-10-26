@@ -247,16 +247,21 @@ fn set_profile(app: AppHandle, id: ProfileId) -> Result<ProfileChoice, String> {
 /// Bascule l'interrupteur principal, puis remet tout le monde d'accord : accumulateur de
 /// phases, icone, menu, et interface si elle est ouverte.
 ///
-/// Allume, il applique le profil choisi ; eteint, il rend la machine.
+/// Allume, il applique le profil choisi ; eteint, il rend la machine. La position est
+/// retenue une fois la machine basculee, pour etre reprise au lancement suivant.
 pub(crate) fn apply_optimization(app: &AppHandle, on: bool) -> Result<PowerState, String> {
     let guard = app.state::<PowerGuard>();
+    let settings = app.state::<Settings>();
     let state = if on {
-        let chosen = app.state::<Settings>().prefs().profile;
-        guard.engage(profiles::get(chosen))?
+        guard.engage(profiles::get(settings.prefs().profile))?
     } else {
         guard.release()?
     };
     sync_power(app, &state);
+    // La machine a deja bascule : une preference perdue ne vaut pas une erreur affichee.
+    if let Err(e) = settings.set_optimize(state.optimized) {
+        eprintln!("memorisation de l'interrupteur : {e}");
+    }
     Ok(state)
 }
 
@@ -347,11 +352,22 @@ pub fn run() {
             if let Err(e) = guard.restore() {
                 eprintln!("restauration du schema d'alimentation : {e}");
             }
-            app.manage(guard);
 
             // L'etat d'alimentation precede tout le reste : il decide de l'icone posee,
             // de la coche du menu et de la phase qui commence a accumuler.
-            let initial = power::state().ok();
+            let mut initial = power::state().ok();
+
+            // L'interrupteur reprend la position ou on l'a laisse. Sans elevation, on ne
+            // tente rien : l'echec serait certain et la preference reste pour la suite.
+            let prefs = app.state::<Settings>().prefs();
+            if prefs.optimize && initial.as_ref().is_some_and(|s| s.elevated && !s.optimized) {
+                match guard.engage(profiles::get(prefs.profile)) {
+                    Ok(state) => initial = Some(state),
+                    Err(e) => eprintln!("reprise du bridage : {e}"),
+                }
+            }
+            app.manage(guard);
+
             let optimized = initial.as_ref().is_some_and(|s| s.optimized);
             let elevated = initial.as_ref().is_some_and(|s| s.elevated);
             recorder.set_phase(initial.as_ref().map_or(PhaseKey::Free, PhaseKey::of));
