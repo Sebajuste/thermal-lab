@@ -731,6 +731,62 @@ h2 {
   user-select: text;
 }
 
+/* Diagnostic : dense, monospace, lisible sur une photo d'écran */
+
+.diag {
+  margin-top: 10px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--text);
+  user-select: text;
+}
+
+.diag p {
+  margin: 3px 0;
+  word-break: break-word;
+}
+
+.diag-guid {
+  color: var(--muted);
+}
+
+.diag-scroll {
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.diag-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.diag-table th,
+.diag-table td {
+  padding: 2px 6px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.diag-table th {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.diag-table td:first-child {
+  text-align: left;
+}
+
+/* Un levier dont la valeur appliquée n'est pas celle du profil choisi. */
+.diag-table tr.off td {
+  color: var(--warn);
+}
+
+.diag-table td.locked {
+  color: var(--err);
+  font-weight: 600;
+}
+
 /* Mise à jour */
 
 .update {
