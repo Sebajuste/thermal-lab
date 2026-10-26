@@ -91,7 +91,10 @@ fn read_capabilities(hub: tauri::State<'_, SensorHub>) -> Capabilities {
 
 /// Relit l'etat d'alimentation et le resynchronise partout : le schema peut aussi
 /// changer depuis Windows, sans passer par nous.
-#[tauri::command]
+///
+/// Hors du thread principal : cinq appels a `powercfg`, une centaine de millisecondes,
+/// sondes toutes les cinq secondes panneau ouvert.
+#[tauri::command(async)]
 fn power_state(app: AppHandle) -> Result<PowerState, String> {
     let state = power::state()?;
     sync_power(&app, &state);
@@ -179,6 +182,34 @@ fn set_auto_update(app: AppHandle, on: bool) -> Result<bool, String> {
     Ok(app.state::<Settings>().set_auto_update(on)?.auto_update)
 }
 
+/// Tout ce qu'il faut pour comprendre une machine qu'on ne peut pas interroger soi-meme,
+/// d'un seul geste : un poste gere n'offre parfois ni console, ni copier-coller.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Diagnosis {
+    power: power::PowerDiagnosis,
+    /// Le journal de restauration tel qu'il est sur le disque, s'il existe.
+    restore_journal: Option<String>,
+    gpu_clamp: ClampStatus,
+    /// Un verrou GPU est consigne comme pose.
+    gpu_clamp_journal: bool,
+    reading: Reading,
+}
+
+#[tauri::command(async)]
+fn diagnose(app: AppHandle) -> Result<Diagnosis, String> {
+    let dir = app.path().app_config_dir().ok();
+    Ok(Diagnosis {
+        power: power::diagnose()?,
+        restore_journal: dir.as_deref().and_then(|d| Journal::in_dir(d).raw()),
+        gpu_clamp: app.state::<Arc<GpuClamp>>().status(),
+        gpu_clamp_journal: dir
+            .as_deref()
+            .is_some_and(|d| ClampJournal::in_dir(d).pending()),
+        reading: app.state::<SensorHub>().latest(),
+    })
+}
+
 #[tauri::command]
 fn gpu_clamp_state(clamp: tauri::State<'_, Arc<GpuClamp>>) -> ClampStatus {
     clamp.status()
@@ -216,16 +247,21 @@ fn set_profile(app: AppHandle, id: ProfileId) -> Result<ProfileChoice, String> {
 /// Bascule l'interrupteur principal, puis remet tout le monde d'accord : accumulateur de
 /// phases, icone, menu, et interface si elle est ouverte.
 ///
-/// Allume, il applique le profil choisi ; eteint, il rend la machine.
+/// Allume, il applique le profil choisi ; eteint, il rend la machine. La position est
+/// retenue une fois la machine basculee, pour etre reprise au lancement suivant.
 pub(crate) fn apply_optimization(app: &AppHandle, on: bool) -> Result<PowerState, String> {
     let guard = app.state::<PowerGuard>();
+    let settings = app.state::<Settings>();
     let state = if on {
-        let chosen = app.state::<Settings>().prefs().profile;
-        guard.engage(profiles::get(chosen))?
+        guard.engage(profiles::get(settings.prefs().profile))?
     } else {
         guard.release()?
     };
     sync_power(app, &state);
+    // La machine a deja bascule : une preference perdue ne vaut pas une erreur affichee.
+    if let Err(e) = settings.set_optimize(state.optimized) {
+        eprintln!("memorisation de l'interrupteur : {e}");
+    }
     Ok(state)
 }
 
@@ -316,11 +352,22 @@ pub fn run() {
             if let Err(e) = guard.restore() {
                 eprintln!("restauration du schema d'alimentation : {e}");
             }
-            app.manage(guard);
 
             // L'etat d'alimentation precede tout le reste : il decide de l'icone posee,
             // de la coche du menu et de la phase qui commence a accumuler.
-            let initial = power::state().ok();
+            let mut initial = power::state().ok();
+
+            // L'interrupteur reprend la position ou on l'a laisse. Sans elevation, on ne
+            // tente rien : l'echec serait certain et la preference reste pour la suite.
+            let prefs = app.state::<Settings>().prefs();
+            if prefs.optimize && initial.as_ref().is_some_and(|s| s.elevated && !s.optimized) {
+                match guard.engage(profiles::get(prefs.profile)) {
+                    Ok(state) => initial = Some(state),
+                    Err(e) => eprintln!("reprise du bridage : {e}"),
+                }
+            }
+            app.manage(guard);
+
             let optimized = initial.as_ref().is_some_and(|s| s.optimized);
             let elevated = initial.as_ref().is_some_and(|s| s.elevated);
             recorder.set_phase(initial.as_ref().map_or(PhaseKey::Free, PhaseKey::of));
@@ -396,6 +443,7 @@ pub fn run() {
             set_profile,
             gpu_clamp_state,
             set_gpu_clamp,
+            diagnose,
             update::check_update,
             update::install_update
         ])

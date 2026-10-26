@@ -46,6 +46,19 @@ const PERFEPP: &str = "36687f9e-e3a5-4dbf-b1dc-15eb381c6863";
 const PROCTHROTTLEMAX1: &str = "bc5038f7-23e0-4960-96da-33abaf5935ed";
 const PERFEPP1: &str = "36687f9e-e3a5-4dbf-b1dc-15eb381c6864";
 
+/// Les leviers, par leur alias `powercfg` : c'est le nom que le diagnostic affiche.
+const LEVERS: [(&str, &str); 5] = [
+    ("PERFBOOSTMODE", PERFBOOSTMODE),
+    ("PROCTHROTTLEMAX", PROCTHROTTLEMAX),
+    ("PERFEPP", PERFEPP),
+    ("PROCTHROTTLEMAX1", PROCTHROTTLEMAX1),
+    ("PERFEPP1", PERFEPP1),
+];
+
+/// Ou une strategie de groupe depose ses reglages d'alimentation. Une valeur presente
+/// ici s'applique quoi que dise le schema, et `powercfg` ne la change pas.
+const POLICY_PATH: &str = r"SOFTWARE\Policies\Microsoft\Power\PowerSettings";
+
 /// Les valeurs des leviers CPU, telles que le schema les porte.
 ///
 /// Les leviers optionnels n'ont pas la meme absence selon l'endroit : dans un etat relu,
@@ -122,6 +135,9 @@ pub struct PowerState {
     /// rendue, et pour un bridage qu'aucun profil ne decrit — pose par un outil tiers.
     pub profile: Option<ProfileId>,
     pub elevated: bool,
+    /// Les leviers qu'une strategie de groupe impose : ecrire dans le schema n'y change
+    /// rien. Vide hors poste gere.
+    pub policy_locked: Vec<&'static str>,
 }
 
 impl PowerState {
@@ -139,6 +155,7 @@ impl PowerState {
             optimized: targets.caps_turbo() || profile.is_some(),
             profile,
             elevated,
+            policy_locked: Vec::new(),
         }
     }
 
@@ -216,12 +233,95 @@ fn active_scheme() -> Result<(String, String), String> {
     Ok((guid, extract_name(&out)))
 }
 
-fn read_setting(guid: &str, setting: &str, default: u32) -> u32 {
-    let path = format!("{SCHEMES_PATH}\\{guid}\\{SUB_PROCESSOR}\\{setting}");
-    RegKey::predef(HKEY_LOCAL_MACHINE)
-        .open_subkey_with_flags(path, KEY_READ)
-        .and_then(|k| k.get_value::<u32, _>("ACSettingIndex"))
-        .unwrap_or(default)
+/// Les index secteur et batterie d'une cle, s'ils y sont.
+fn registry_indices(path: &str) -> (Option<u32>, Option<u32>) {
+    match RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(path, KEY_READ) {
+        Ok(k) => (
+            k.get_value::<u32, _>("ACSettingIndex").ok(),
+            k.get_value::<u32, _>("DCSettingIndex").ok(),
+        ),
+        Err(_) => (None, None),
+    }
+}
+
+/// Un levier tel que chaque source le voit. C'est ce qui explique qu'une machine ne
+/// ressemble pas au profil qu'on vient de lui appliquer : une strategie qui impose sa
+/// valeur, un logiciel qui reecrit derriere nous, une cle absente.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeverReading {
+    pub name: &'static str,
+    /// `powercfg /qh` : la valeur du schema, defauts resolus.
+    pub scheme_ac: Option<u32>,
+    pub scheme_dc: Option<u32>,
+    /// La cle du schema dans le registre : absente tant que personne ne l'a ecrite.
+    pub registry_ac: Option<u32>,
+    pub registry_dc: Option<u32>,
+    /// Une strategie de groupe : si elle est la, c'est elle qui s'applique.
+    pub policy_ac: Option<u32>,
+    pub policy_dc: Option<u32>,
+}
+
+impl LeverReading {
+    /// Ce qui s'applique en secteur : la strategie, sinon le schema, sinon sa cle.
+    pub fn effective(&self) -> Option<u32> {
+        self.policy_ac.or(self.scheme_ac).or(self.registry_ac)
+    }
+}
+
+fn read_lever(guid: &str, name: &'static str, setting: &str) -> LeverReading {
+    let (scheme_ac, scheme_dc) = powercfg(&["/qh", guid, SUB_PROCESSOR, setting])
+        .ok()
+        .and_then(|out| indices(&out))
+        .map_or((None, None), |(ac, dc)| (Some(ac), Some(dc)));
+    let (registry_ac, registry_dc) = registry_indices(&format!(
+        "{SCHEMES_PATH}\\{guid}\\{SUB_PROCESSOR}\\{setting}"
+    ));
+    let (policy_ac, policy_dc) = registry_indices(&format!("{POLICY_PATH}\\{setting}"));
+    LeverReading {
+        name,
+        scheme_ac,
+        scheme_dc,
+        registry_ac,
+        registry_dc,
+        policy_ac,
+        policy_dc,
+    }
+}
+
+fn read_levers(guid: &str) -> Vec<LeverReading> {
+    LEVERS
+        .iter()
+        .map(|(name, setting)| read_lever(guid, name, setting))
+        .collect()
+}
+
+/// Tout ce que la machine dit de ses leviers, d'un coup. Plus lent que `state` : une
+/// action de l'utilisateur, pas un sondage.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerDiagnosis {
+    pub scheme_guid: String,
+    pub scheme_name: String,
+    pub elevated: bool,
+    /// Le schema qu'une strategie impose comme actif, s'il y en a un.
+    pub policy_scheme: Option<String>,
+    pub levers: Vec<LeverReading>,
+}
+
+pub fn diagnose() -> Result<PowerDiagnosis, String> {
+    let (guid, name) = active_scheme()?;
+    let policy_scheme = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags(POLICY_PATH, KEY_READ)
+        .and_then(|k| k.get_value::<String, _>("ActivePowerScheme"))
+        .ok();
+    Ok(PowerDiagnosis {
+        levers: read_levers(&guid),
+        scheme_guid: guid,
+        scheme_name: name,
+        elevated: is_elevated(),
+        policy_scheme,
+    })
 }
 
 /// Elevation du process, lue sur le jeton.
@@ -250,48 +350,53 @@ pub(crate) fn is_elevated() -> bool {
     }
 }
 
-/// La valeur effective d'un reglage du schema, en courant alternatif.
-///
-/// Pas par le registre : la cle y est absente tant que personne ne l'a ecrite, et la
-/// valeur vient alors des defauts propres a chaque schema — introuvables pour un schema
-/// cree par l'utilisateur. `powercfg /qh` resout les deux cas, reglage masque compris,
-/// pour une vingtaine de millisecondes par reglage. Le sous-groupe entier en une fois
-/// en coute 800 : un appel par reglage, donc.
-fn read_hidden(guid: &str, setting: &str) -> Option<u32> {
-    powercfg(&["/qh", guid, SUB_PROCESSOR, setting])
-        .ok()
-        .and_then(|out| ac_index(&out))
-}
-
 /// Ce qu'il faut pour savoir si l'on peut ecrire : un schema lisible, et l'elevation.
-/// Sans relire les leviers, qui coutent trois appels a `powercfg`.
+/// Sans relire les leviers, qui coutent cinq appels a `powercfg`.
 pub fn access() -> Result<bool, String> {
     active_scheme().map(|_| is_elevated())
 }
 
+/// Les index secteur et batterie d'une sortie de `powercfg /qh`.
+///
 /// La sortie est localisee, mais ses valeurs ne le sont pas : minimum, maximum,
-/// increment, puis index secteur et index batterie, tous en `0x` sur huit chiffres.
-/// L'index secteur est l'avant-dernier.
-fn ac_index(text: &str) -> Option<u32> {
+/// increment pour un reglage a plage, puis index secteur et index batterie, tous en
+/// `0x` sur huit chiffres. Les deux derniers sont ceux qu'on cherche.
+fn indices(text: &str) -> Option<(u32, u32)> {
     let values: Vec<u32> = text
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter_map(|t| t.strip_prefix("0x"))
         .filter(|h| h.len() == 8)
         .filter_map(|h| u32::from_str_radix(h, 16).ok())
         .collect();
-    values.len().checked_sub(2).map(|i| values[i])
+    match values.as_slice() {
+        [.., ac, dc] => Some((*ac, *dc)),
+        _ => None,
+    }
 }
 
+/// Les cinq leviers par la meme voie. `powercfg /qh` plutot que le registre : la cle du
+/// schema est absente tant que personne ne l'a ecrite, la valeur vient alors de defauts
+/// propres a chaque schema. Une strategie de groupe prime sur les deux — c'est elle qui
+/// s'applique. Une vingtaine de millisecondes par levier ; le sous-groupe entier en une
+/// fois en coute 800.
 pub fn state() -> Result<PowerState, String> {
     let (guid, name) = active_scheme()?;
+    let levers = read_levers(&guid);
+    let value = |i: usize| levers[i].effective();
     let targets = Targets {
-        boost_mode: read_setting(&guid, PERFBOOSTMODE, WINDOWS_DEFAULTS.boost_mode),
-        throttle_max: read_setting(&guid, PROCTHROTTLEMAX, WINDOWS_DEFAULTS.throttle_max),
-        epp: read_hidden(&guid, PERFEPP),
-        throttle_max_1: read_hidden(&guid, PROCTHROTTLEMAX1),
-        epp_1: read_hidden(&guid, PERFEPP1),
+        boost_mode: value(0).unwrap_or(WINDOWS_DEFAULTS.boost_mode),
+        throttle_max: value(1).unwrap_or(WINDOWS_DEFAULTS.throttle_max),
+        epp: value(2),
+        throttle_max_1: value(3),
+        epp_1: value(4),
     };
-    Ok(PowerState::new(guid, name, targets, is_elevated()))
+    let mut state = PowerState::new(guid, name, targets, is_elevated());
+    state.policy_locked = levers
+        .iter()
+        .filter(|l| l.policy_ac.is_some())
+        .map(|l| l.name)
+        .collect();
+    Ok(state)
 }
 
 /// Pose des valeurs sur un schema donne, et les applique.
@@ -369,7 +474,7 @@ mod tests {
 
     /// Sortie reelle de `powercfg /qh` sur le schema Equilibre : 33 sur secteur.
     #[test]
-    fn reads_the_ac_index_from_localized_output() {
+    fn reads_the_indices_from_localized_output() {
         let fr = "GUID du mode de gestion de l'alimentation : 381b4222-f694-41f0-9685-ff5bb260df2e  (Utilisation normale)
   GUID du sous-groupe : 54533251-82be-4824-96c1-47b60b740d00  (Gestion de l'alimentation du processeur)
     GUID du parametre d'alimentation : 36687f9e-e3a5-4dbf-b1dc-15eb381c6863
@@ -379,17 +484,17 @@ mod tests {
       Unites possibles des parametres :  %
     Index actuel du parametre de courant alternatif : 0x00000021
     Index actuel du parametre de courant continu : 0x00000032";
-        assert_eq!(ac_index(fr), Some(33));
+        assert_eq!(indices(fr), Some((33, 50)));
 
         let en = "    Current AC Power Setting Index: 0x0000003c
     Current DC Power Setting Index: 0x00000050";
-        assert_eq!(ac_index(en), Some(60));
+        assert_eq!(indices(en), Some((60, 80)));
     }
 
     #[test]
     fn no_index_means_no_value() {
-        assert_eq!(ac_index("Le parametre n'existe pas."), None);
-        assert_eq!(ac_index("Index : 0x00000021"), None);
+        assert_eq!(indices("Le parametre n'existe pas."), None);
+        assert_eq!(indices("Index : 0x00000021"), None);
     }
 
     /// Lit la machine reelle, sans rien ecrire : `cargo test -- --ignored --nocapture`.
@@ -405,5 +510,31 @@ mod tests {
     #[test]
     fn rejects_malformed_guid() {
         assert_eq!(extract_guid("pas de guid ici 1234-56"), None);
+    }
+
+    /// Une strategie de groupe s'applique quoi que dise le schema ; le schema, quoi que
+    /// dise une cle absente ou perimee.
+    #[test]
+    fn a_policy_wins_over_the_scheme() {
+        let lever = |scheme, registry, policy| LeverReading {
+            name: "PROCTHROTTLEMAX",
+            scheme_ac: scheme,
+            scheme_dc: scheme,
+            registry_ac: registry,
+            registry_dc: registry,
+            policy_ac: policy,
+            policy_dc: policy,
+        };
+        assert_eq!(lever(Some(80), Some(80), Some(100)).effective(), Some(100));
+        assert_eq!(lever(Some(80), None, None).effective(), Some(80));
+        assert_eq!(lever(None, Some(90), None).effective(), Some(90));
+        assert_eq!(lever(None, None, None).effective(), None);
+    }
+
+    /// Lit la machine reelle, sans rien ecrire.
+    #[test]
+    #[ignore]
+    fn diagnoses_the_real_scheme() {
+        println!("{:#?}", diagnose().expect("schema lisible"));
     }
 }

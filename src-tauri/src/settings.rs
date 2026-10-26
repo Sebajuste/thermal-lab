@@ -32,6 +32,9 @@ pub struct Prefs {
     /// Brider la carte graphique quand elle consomme sans rien produire. Faux par
     /// defaut : c'est une ecriture dans le pilote graphique, et elle se demande.
     pub gpu_idle_clamp: bool,
+    /// La derniere position de l'interrupteur principal. L'arret rend toujours la
+    /// machine ; c'est cette intention qui la fait rebrider au lancement suivant.
+    pub optimize: bool,
 }
 
 pub struct Settings {
@@ -100,6 +103,19 @@ impl Settings {
         Ok(next)
     }
 
+    /// Meme contrat que les autres : la reponse est ce qui a ete ecrit.
+    pub fn set_optimize(&self, on: bool) -> Result<Prefs, String> {
+        let next = {
+            let mut prefs = self.prefs.lock().map_err(|_| {
+                crate::t!("settings unusable", "réglages inutilisables").to_string()
+            })?;
+            prefs.optimize = on;
+            *prefs
+        };
+        self.save(&next)?;
+        Ok(next)
+    }
+
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
         let Some(path) = self.path.as_ref() else {
             return Err(crate::t!(
@@ -137,6 +153,7 @@ mod tests {
             !prefs.gpu_idle_clamp,
             "une ecriture dans le pilote se demande"
         );
+        assert!(!prefs.optimize);
     }
 
     #[test]
@@ -145,6 +162,7 @@ mod tests {
             auto_update: true,
             profile: ProfileId::Aggressive,
             gpu_idle_clamp: true,
+            optimize: true,
         };
         let raw = serde_json::to_string(&prefs).expect("serialisable");
         assert!(raw.contains("autoUpdate"), "{raw}");
@@ -152,5 +170,6 @@ mod tests {
         let back: Prefs = serde_json::from_str(&raw).expect("relisible");
         assert!(back.auto_update);
         assert_eq!(back.profile, ProfileId::Aggressive);
+        assert!(back.optimize);
     }
 }

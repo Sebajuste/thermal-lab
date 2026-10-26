@@ -23,6 +23,8 @@ instead of taking someone's word for it.
   toward saving power
 - An opt-in cap for a graphics card that draws power while doing nothing — no display,
   no load, yet stuck in a performance state. Released at the first sign of work
+- A one-click diagnostic in the System tab: every CPU setting as each source sees it,
+  the restore journal and the GPU state, on one screen you can photograph
 - A compare tab that averages each state separately — flip mid-game, read the difference
   at the same workload
 - Lives in the notification area; left-click the icon for the panel, right-click for the
